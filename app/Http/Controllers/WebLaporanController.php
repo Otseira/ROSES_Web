@@ -42,7 +42,7 @@ class WebLaporanController extends Controller
         $users = $queryUsers->get()->map(function ($user) use ($startDate, $endDate, $ratePotongan, $rateLembur) {
             $logsAbsen = LogAbsensi::whereHas('roster', function ($query) use ($user, $startDate, $endDate) {
                 $query->where('user_id', $user->id)
-                      ->whereBetween('tanggal_dinas', [$startDate, $endDate]);
+                    ->whereBetween('tanggal_dinas', [$startDate, $endDate]);
             })->get();
 
             $totalHadir = $logsAbsen->whereNotNull('waktu_masuk')->count();
@@ -50,7 +50,7 @@ class WebLaporanController extends Controller
             $potongan = $totalMenitTerlambat * $ratePotongan;
 
             $totalJamLembur = LogLembur::where('user_id', $user->id)
-                ->where('status_validasi', 'Disetujui') 
+                ->where('status_validasi', 'Disetujui')
                 ->whereBetween('waktu_mulai_lembur', [$startDate . ' 00:00:00', $endDate . ' 23:59:59'])
                 ->sum('total_jam_lembur');
 
@@ -74,81 +74,122 @@ class WebLaporanController extends Controller
     }
 
     /**
+     * ✅ BARU: Membangun detail log absensi harian (dipakai index & PDF agar identik).
+     * Menghitung jarak (radius) tiap absen dari titik RS.
+     */
+    private function buildAbsensiDetail($startDate, $endDate)
+    {
+        // Koordinat titik RS: ambil dari Pengaturan Aplikasi bila tersedia,
+        // selain itu fallback ke nilai default (aman walau model belum dibuat).
+        $hospitalLat = -0.9471;
+        $hospitalLng = 100.3511;
+        if (class_exists(\App\Models\PengaturanAplikasi::class)) {
+            $pa = \App\Models\PengaturanAplikasi::first();
+            if ($pa) {
+                if ($pa->latitude  !== null) $hospitalLat = (float) $pa->latitude;
+                if ($pa->longitude !== null) $hospitalLng = (float) $pa->longitude;
+            }
+        }
+
+        return LogAbsensi::with(['roster.user'])
+            ->whereHas('roster', function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('tanggal_dinas', [$startDate, $endDate]);
+            })
+            ->get()
+            ->map(function ($log) use ($hospitalLat, $hospitalLng) {
+                $log->jarak_masuk  = $this->calculateDistance($log->latitude_masuk, $log->longitude_masuk, $hospitalLat, $hospitalLng);
+                $log->jarak_pulang = $log->latitude_pulang
+                    ? $this->calculateDistance($log->latitude_pulang, $log->longitude_pulang, $hospitalLat, $hospitalLng)
+                    : null;
+                return $log;
+            });
+    }
+
+    /**
      * Tampilan Utama Halaman Web Laporan
      */
     public function index(Request $request)
-{
-    // Ambil data untuk payroll (fungsi yang sudah ada)
-    $data = $this->generateDataLaporan($request);
-    
-    // Ambil Pengaturan koordinat
-    $pengaturan = PengaturanPayroll::first(); // Asumsi koordinat di tabel payroll/pengaturan
-    // Jika koordinat ada di PengaturanAplikasi, ganti dengan: PengaturanAplikasi::first();
-    $hospitalLat = -0.9471; // Ganti sesuai koordinat RS Anda
-    $hospitalLng = 100.3511;
+    {
+        $data = $this->generateDataLaporan($request);
+        $absensiDetail = $this->buildAbsensiDetail($data['startDate'], $data['endDate']); // ✅ pakai method bersama
 
-    // Ambil data log absensi detail dengan relasi user
-    $absensiDetail = LogAbsensi::with(['roster.user'])
-        ->whereHas('roster', function($q) use ($data) {
-            $q->whereBetween('tanggal_dinas', [$data['startDate'], $data['endDate']]);
-        })
-        ->get()
-        ->map(function ($log) use ($hospitalLat, $hospitalLng) {
-            $log->jarak_masuk = $this->calculateDistance($log->latitude_masuk, $log->longitude_masuk, $hospitalLat, $hospitalLng);
-            $log->jarak_pulang = ($log->latitude_pulang) ? $this->calculateDistance($log->latitude_pulang, $log->longitude_pulang, $hospitalLat, $hospitalLng) : null;
-            return $log;
-        });
-
-    return view('laporan', array_merge($data, ['absensiDetail' => $absensiDetail]));
-}
-
-private function calculateDistance($lat1, $lon1, $lat2, $lon2) {
-    if (!$lat1 || !$lon1) return null;
-    $earthRadius = 6371000;
-    $latDelta = deg2rad($lat2 - $lat1);
-    $lonDelta = deg2rad($lon2 - $lon1);
-    $a = sin($latDelta / 2) * sin($latDelta / 2) + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($lonDelta / 2) * sin($lonDelta / 2);
-    return round($earthRadius * 2 * atan2(sqrt($a), sqrt(1 - $a)));
-}
+        return view('laporan', array_merge($data, ['absensiDetail' => $absensiDetail]));
+    }
 
     /**
-     * Ekspor Data ke Format Excel (CSV)
+     * Ekspor Data ke Format Excel (CSV) — TIDAK DIUBAH
+     */
+    /**
+     * Ekspor Data ke Format Excel (CSV) — SEKARANG MENGIKUTI KOLOM WEB/PDF
      */
     public function exportExcel(Request $request)
     {
         $data = $this->generateDataLaporan($request);
+
+        // ✅ Ambil log harian (sumber yang SAMA dengan web & PDF)
+        $absensiDetail = $this->buildAbsensiDetail($data['startDate'], $data['endDate']);
+
         $fileName = 'Rekap_Absensi_' . $data['bulan'] . '_' . $data['tahun'] . '.csv';
 
         $headers = [
-            "Content-type"        => "text/csv",
+            "Content-type"        => "text/csv; charset=UTF-8",
             "Content-Disposition" => "attachment; filename=$fileName",
             "Pragma"              => "no-cache",
             "Cache-Control"       => "must-revalidate, post-check=0, pre-check=0",
             "Expires"             => "0"
         ];
 
-        // Header Kolom di Excel
-        $columns = ['NIK', 'Nama Pegawai', 'Unit Kerja', 'Hadir (Hari)', 'Terlambat (Menit)', 'Potongan (Rp)', 'Lembur (Jam)', 'Insentif Lembur (Rp)', 'Total Netto (Rp)'];
+        // Header kolom = SAMA PERSIS dengan header tabel web & PDF
+        $columns = ['Nama', 'Jam Masuk', 'Jam Keluar', 'Tanggal', 'Radius (m)', 'Latitude', 'Longitude'];
 
-        $callback = function() use($data, $columns) {
+        // Helper format
+        $fmtJam   = fn($t) => $t ? Carbon::parse($t)->format('H:i') : '-';
+        $fmtTgl   = fn($t) => $t ? Carbon::parse($t)->format('d/m/Y') : '-';
+        $fmtCoord = fn($v) => ($v === null || $v === '') ? '-' : number_format((float)$v, 4, '.', '');
+
+        // Radius: gabung Masuk / Pulang dalam satu sel (konsisten dengan web)
+        $radiusPair = function ($m, $p) {
+            $f = fn($v) => ($v === null || $v === '') ? null : number_format((float)$v, 0, ',', '.');
+            $a = $f($m);
+            $b = $f($p);
+            if ($a !== null && $b !== null) return $a . ' / ' . $b;
+            if ($a !== null) return $a;
+            if ($b !== null) return $b;
+            return '-';
+        };
+
+        // Koordinat: gabung Masuk / Pulang dalam satu sel
+        $coordPair = function ($m, $p) use ($fmtCoord) {
+            $a = $fmtCoord($m);
+            $b = $fmtCoord($p);
+            if ($a === '-' && $b === '-') return '-';
+            return $a . ' / ' . $b;
+        };
+
+        $callback = function () use ($absensiDetail, $columns, $fmtJam, $fmtTgl, $radiusPair, $coordPair) {
             $file = fopen('php://output', 'w');
-            fputcsv($file, $columns); // Tulis Header
 
-            foreach ($data['users'] as $user) {
+            // BOM UTF-8 agar Excel membaca karakter Indonesia dengan benar
+            fwrite($file, "\xEF\xBB\xBF");
+
+            fputcsv($file, $columns); // Header
+
+            foreach ($absensiDetail as $log) {
                 fputcsv($file, [
-                    $user->nik,
-                    $user->nama,
-                    $user->unit,
-                    $user->kehadiran,
-                    $user->menit_terlambat,
-                    $user->potongan,
-                    $user->jam_lembur,
-                    $user->insentif_lembur,
-                    $user->netto
+                    $log->roster?->user?->name ?? '-',
+                    $fmtJam($log->waktu_masuk),
+                    $fmtJam($log->waktu_pulang),
+                    $fmtTgl($log->roster?->tanggal_dinas ?? null),
+                    $radiusPair($log->jarak_masuk, $log->jarak_pulang),
+                    $coordPair($log->latitude_masuk, $log->latitude_pulang),
+                    $coordPair($log->longitude_masuk, $log->longitude_pulang),
                 ]);
             }
+
             fclose($file);
         };
+
+        return response()->stream($callback, 200, $headers);
 
         return response()->stream($callback, 200, $headers);
     }
@@ -159,6 +200,19 @@ private function calculateDistance($lat1, $lon1, $lat2, $lon2) {
     public function exportPdf(Request $request)
     {
         $data = $this->generateDataLaporan($request);
-        return view('laporan-pdf', $data);
+        // ✅ PERBAIKAN: bangun & kirim 'absensiDetail' (sama persis dengan index)
+        $absensiDetail = $this->buildAbsensiDetail($data['startDate'], $data['endDate']);
+
+        return view('laporan-pdf', array_merge($data, ['absensiDetail' => $absensiDetail]));
+    }
+
+    private function calculateDistance($lat1, $lon1, $lat2, $lon2)
+    {
+        if (!$lat1 || !$lon1) return null;
+        $earthRadius = 6371000;
+        $latDelta = deg2rad($lat2 - $lat1);
+        $lonDelta = deg2rad($lon2 - $lon1);
+        $a = sin($latDelta / 2) * sin($latDelta / 2) + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($lonDelta / 2) * sin($lonDelta / 2);
+        return round($earthRadius * 2 * atan2(sqrt($a), sqrt(1 - $a)));
     }
 }
