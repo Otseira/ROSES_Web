@@ -16,7 +16,7 @@ Route::post('/login', [AuthController::class, 'login']);
 // RUTE TERPROTEKSI (Flutter wajib mengirimkan Bearer Token Sanctum)
 // ===================================================================
 Route::middleware('auth:sanctum')->group(function () {
-    
+
     // Manajemen Akun
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
@@ -27,16 +27,16 @@ Route::middleware('auth:sanctum')->group(function () {
     // ===================================================================
     Route::post('/absensi/masuk', [AbsensiController::class, 'clockIn']);
     Route::post('/absensi/pulang', [AbsensiController::class, 'clockOut']);
-    
+
     Route::post('/lembur/ekstensi', [LemburController::class, 'storeEkstensi']);
-    Route::post('/lembur/oncall-masuk', [LemburController::class, 'storeOnCallMasuk']);
-    Route::post('/lembur/oncall-keluar', [LemburController::class, 'storeOnCallPulang']);
+    Route::post('/lembur/oncall-masuk', [LemburController::class, 'clockInOnCall']);
+    Route::post('/lembur/oncall-keluar', [LemburController::class, 'clockOutOnCall']);
 
     // ===================================================================
     // KELOMPOK OPERASIONAL & LAPORAN (Opsional jika ingin diakses via Mobile)
     // ===================================================================
     Route::get('/roster/unit', [RosterController::class, 'index']);
     Route::post('/roster/bulk-store', [RosterController::class, 'bulkStore']);
-    
+
     Route::get('/laporan/rekap-bulanan', [LaporanController::class, 'rekapBulanan']);
 });

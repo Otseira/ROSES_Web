@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class User extends Authenticatable
 {
@@ -44,4 +46,22 @@ class User extends Authenticatable
         'password' => 'hashed',
         'is_active' => 'boolean', // <-- TAMBAHKAN INI agar otomatis jadi true/false
     ];
+
+    public function logAbsensis(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            LogAbsensi::class,
+            JadwalRoster::class,
+            'user_id',        // Foreign key di jadwal_rosters
+            'roster_id',      // Foreign key di log_absensis
+            'id',             // Local key di users
+            'id'              // Local key di jadwal_rosters
+        );
+    }
+
+    // Relasi: Karyawan memiliki banyak log lembur (alias untuk kompatibilitas)
+    public function logLemburs(): HasMany
+    {
+        return $this->hasMany(LogLembur::class, 'user_id');
+    }
 }

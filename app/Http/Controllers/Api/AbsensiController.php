@@ -20,11 +20,11 @@ class AbsensiController extends Controller
         $request->validate([
             'latitude' => 'required|numeric',
             'longitude' => 'required|numeric',
-            'foto' => 'required|image|mimes:jpeg,png,jpg|max:2048', 
+            'foto' => 'required|image|mimes:jpeg,png,jpg|max:2048',
         ]);
 
         $user = $request->user();
-        
+
         if ($user->role === 'superadmin') {
             return response()->json([
                 'success' => false,
@@ -56,13 +56,18 @@ class AbsensiController extends Controller
             ], 422);
         }
 
-        // Default koordinat cadangan (Fallback jika pengaturan belum diset di web)
+        // Ambil pengaturan GPS dari database
         $pengaturan = PengaturanAplikasi::first();
-        $hospitalLat = $pengaturan ? $pengaturan->latitude : -0.9471;
-        $hospitalLng = $pengaturan ? $pengaturan->longitude : 100.3511;
-        $maxRadius = $pengaturan ? $pengaturan->radius_meter : 50;
+        $hospitalLat = $pengaturan ? (float) $pengaturan->latitude : -0.9471;
+        $hospitalLng = $pengaturan ? (float) $pengaturan->longitude : 100.3511;
+        $maxRadius = $pengaturan ? (int) $pengaturan->radius_meter : 50;
 
-        $distance = $this->calculateDistance($request->latitude, $request->longitude, $hospitalLat, $hospitalLng);
+        $distance = $this->calculateDistance(
+            (float) $request->latitude,
+            (float) $request->longitude,
+            $hospitalLat,
+            $hospitalLng
+        );
 
         if ($distance > $maxRadius) {
             return response()->json([
@@ -77,12 +82,15 @@ class AbsensiController extends Controller
 
         $menitTerlambat = 0;
         if ($now->greaterThan($batasToleransi)) {
-            // Menghitung selisih menit keterlambatan murni dari jam masuk shift seharusnya
-            $menitTerlambat = $now->diffInMinutes($jamMasukShift);
+            // ✅ FIX #7: Urutan diffInMinutes yang benar (dari jam shift ke waktu sekarang)
+            // Carbon 3.x: $start->diffInMinutes($end) = positif jika end > start
+            $menitTerlambat = $jamMasukShift->diffInMinutes($now);
         }
 
+        // ✅ FIX #8: Handle jika NIK null (fallback ke ID)
+        $nik = $user->nik ?? $user->id;
         $file = $request->file('foto');
-        $filename = 'in_' . $user->nik . '_' . time() . '.' . $file->extension(); // Optimasi ekstensi file
+        $filename = 'in_' . $nik . '_' . time() . '.' . $file->extension();
         $path = $file->storeAs('absensi_masuk', $filename, 'public');
 
         LogAbsensi::updateOrCreate(
@@ -132,9 +140,9 @@ class AbsensiController extends Controller
 
         // OPTIMASI: Eager loading relasi roster dan shift langsung di awal kueri
         $logAbsen = LogAbsensi::whereHas('roster', function ($query) use ($user) {
-                $query->where('user_id', $user->id);
-            })
-            ->with(['roster.shift']) 
+            $query->where('user_id', $user->id);
+        })
+            ->with(['roster.shift'])
             ->whereNotNull('waktu_masuk')
             ->whereNull('waktu_pulang')
             ->latest()
@@ -152,11 +160,16 @@ class AbsensiController extends Controller
         $shift = $roster->shift;
 
         $pengaturan = PengaturanAplikasi::first();
-        $hospitalLat = $pengaturan ? $pengaturan->latitude : -0.9471;
-        $hospitalLng = $pengaturan ? $pengaturan->longitude : 100.3511;
-        $maxRadius = $pengaturan ? $pengaturan->radius_meter : 50;
+        $hospitalLat = $pengaturan ? (float) $pengaturan->latitude : -0.9471;
+        $hospitalLng = $pengaturan ? (float) $pengaturan->longitude : 100.3511;
+        $maxRadius = $pengaturan ? (int) $pengaturan->radius_meter : 50;
 
-        $distance = $this->calculateDistance($request->latitude, $request->longitude, $hospitalLat, $hospitalLng);
+        $distance = $this->calculateDistance(
+            (float) $request->latitude,
+            (float) $request->longitude,
+            $hospitalLat,
+            $hospitalLng
+        );
 
         if ($distance > $maxRadius) {
             return response()->json([
@@ -167,7 +180,7 @@ class AbsensiController extends Controller
 
         $jamPulangShift = Carbon::parse($roster->tanggal_dinas . ' ' . $shift->jam_pulang);
         if (Carbon::parse($shift->jam_pulang)->lessThan(Carbon::parse($shift->jam_masuk))) {
-            $jamPulangShift->addDay(); 
+            $jamPulangShift->addDay();
         }
 
         $bisaLembur = false;
@@ -175,11 +188,14 @@ class AbsensiController extends Controller
 
         if ($now->greaterThan($jamPulangShift)) {
             $bisaLembur = true;
-            $kelebihanWaktuMenit = $now->diffInMinutes($jamPulangShift);
+            // ✅ FIX #7: Urutan diffInMinutes yang benar
+            $kelebihanWaktuMenit = $jamPulangShift->diffInMinutes($now);
         }
 
+        // ✅ FIX #8: Handle jika NIK null
+        $nik = $user->nik ?? $user->id;
         $file = $request->file('foto');
-        $filename = 'out_' . $user->nik . '_' . time() . '.' . $file->extension(); // Optimasi ekstensi file
+        $filename = 'out_' . $nik . '_' . time() . '.' . $file->extension();
         $path = $file->storeAs('absensi_pulang', $filename, 'public');
 
         $logAbsen->update([
@@ -195,7 +211,7 @@ class AbsensiController extends Controller
             'message' => 'Absen pulang berhasil dicatat pada ' . $now->format('H:i:s'),
             'data' => [
                 'waktu_pulang' => $now->toDateTimeString(),
-                'bisa_lembur' => $bisaLembur, 
+                'bisa_lembur' => $bisaLembur,
                 'kelebihan_waktu_menit' => $kelebihanWaktuMenit,
             ]
         ], 200);
@@ -204,9 +220,9 @@ class AbsensiController extends Controller
     /**
      * Fungsi Pembantu: Menghitung Jarak (Haversine Formula)
      */
-    private function calculateDistance($lat1, $lon1, $lat2, $lon2)
+    private function calculateDistance(float $lat1, float $lon1, float $lat2, float $lon2): float
     {
-        $earthRadius = 6371000; 
+        $earthRadius = 6371000; // meter
 
         $latDelta = deg2rad($lat2 - $lat1);
         $lonDelta = deg2rad($lon2 - $lon1);
