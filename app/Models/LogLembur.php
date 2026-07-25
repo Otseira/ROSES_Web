@@ -17,6 +17,15 @@ class LogLembur extends Model
         'total_jam_lembur',
         'status_validasi',
         'keterangan',
+        'latitude_masuk',
+        'longitude_masuk',
+        'foto_masuk',
+        'latitude_keluar',
+        'longitude_keluar',
+        'foto_keluar',
+        'divalidasi_oleh',
+        'divalidasi_pada',
+        'catatan_validasi',
     ];
 
     protected $casts = [

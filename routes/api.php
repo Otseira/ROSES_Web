@@ -31,6 +31,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/lembur/ekstensi', [LemburController::class, 'storeEkstensi']);
     Route::post('/lembur/oncall-masuk', [LemburController::class, 'clockInOnCall']);
     Route::post('/lembur/oncall-keluar', [LemburController::class, 'clockOutOnCall']);
+    Route::get('/lembur/validasi', [LemburController::class, 'listValidasi']);
+    Route::post('/lembur/validasi/{id}', [LemburController::class, 'prosesValidasi']);
 
     // ===================================================================
     // KELOMPOK OPERASIONAL & LAPORAN (Opsional jika ingin diakses via Mobile)
