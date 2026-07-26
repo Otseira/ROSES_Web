@@ -12,9 +12,6 @@ use Illuminate\Support\Facades\DB;
 
 class RosterController extends Controller
 {
-    /**
-     * 1. Mengambil Daftar Staf & Jadwal Roster per Unit (Untuk Matriks Dashboard)
-     */
     public function index(Request $request)
     {
         $request->validate([
@@ -35,9 +32,8 @@ class RosterController extends Controller
         $bulan = $request->bulan;
         $tahun = $request->tahun;
 
-        // Ambil semua bawahan di unit kerja yang sama beserta jadwal roster pada bulan & tahun tersebut
         $staf = User::where('unit_kerja_id', $unitKerjaId)
-            ->where('id', '!=', $kepalaUnit->id) // Sembunyikan akun Kepala Unit sendiri jika perlu
+            ->where('id', '!=', $kepalaUnit->id)
             ->with(['rosters' => function ($query) use ($bulan, $tahun) {
                 $query->whereMonth('tanggal_dinas', $bulan)
                     ->whereYear('tanggal_dinas', $tahun)
@@ -45,7 +41,6 @@ class RosterController extends Controller
             }])
             ->get();
 
-        // Ambil daftar master shift sebagai referensi drop-down pilihan di frontend
         $shifts = MasterShift::all();
 
         return response()->json([
@@ -75,9 +70,6 @@ class RosterController extends Controller
         ], 200);
     }
 
-    /**
-     * 2. Menyimpan atau Memperbarui Jadwal Roster Secara Massal (Bulk Store)
-     */
     public function bulkStore(Request $request)
     {
         $request->validate([
@@ -90,12 +82,10 @@ class RosterController extends Controller
         $kepalaUnit = $request->user();
         $unitKerjaId = $kepalaUnit->unit_kerja_id;
 
-        // Gunakan Database Transaction agar jika ada satu data eror, seluruh data dibatalkan (keamanan data)
         DB::beginTransaction();
 
         try {
             foreach ($request->roster_data as $data) {
-                // VALIDASI KEAMANAN: Cek apakah user_id yang mau diinput benar-benar bawahan di unitnya
                 $isBawahan = User::where('id', $data['user_id'])
                     ->where('unit_kerja_id', $unitKerjaId)
                     ->exists();
@@ -108,7 +98,6 @@ class RosterController extends Controller
                     ], 403);
                 }
 
-                // Jalankan operasi Upsert (Insert jika belum ada, Update jika tanggal & user_id sudah ada)
                 JadwalRoster::updateOrCreate(
                     [
                         'user_id' => $data['user_id'],
@@ -135,14 +124,6 @@ class RosterController extends Controller
         }
     }
 
-    /**
-     * Jadwal dinas bulanan (grid per tanggal) untuk user yang login.
-     * GET /api/jadwal-dinas?bulan=&tahun=
-     *
-     * Baris tabel: Tanggal | Jam Masuk (shift) | Jam Keluar (shift)
-     *              | Lembur/On-Call Masuk | Lembur/On-Call Keluar
-     * Tanggal tanpa jadwal dinas => is_libur = true (tampil "Libur").
-     */
     public function jadwalDinas(Request $request)
     {
         $user  = $request->user();
@@ -153,14 +134,12 @@ class RosterController extends Controller
         $end   = $start->copy()->endOfMonth();
         $jumlahHari = $start->daysInMonth;
 
-        // Roster (jadwal shift) per tanggal
-        $rosters = \App\Models\JadwalRoster::with('shift')
+        $rosters = \App\Models\JadwalRoster::with('shift', 'logAbsensi')
             ->where('user_id', $user->id)
             ->whereBetween('tanggal_dinas', [$start->toDateString(), $end->toDateString()])
             ->get()
             ->keyBy(fn($r) => (int) \Carbon\Carbon::parse($r->tanggal_dinas)->day);
 
-        // Lembur / on-call dalam rentang (masuk = per hari mulai, keluar = per hari selesai)
         $lembur = \App\Models\LogLembur::where('user_id', $user->id)
             ->where(function ($q) use ($start, $end) {
                 $q->whereBetween('waktu_mulai_lembur', [$start->toDateTimeString(), $end->toDateTimeString()])
@@ -185,19 +164,23 @@ class RosterController extends Controller
 
         $hari = [];
         for ($d = 1; $d <= $jumlahHari; $d++) {
-            $r = $rosters[$d] ?? null;
+            $r   = $rosters[$d] ?? null;
+            $log = $r?->logAbsensi;                       
             $shiftNama = $r?->shift?->nama_shift;
             $low = strtolower(trim((string) $shiftNama));
             $libur = ($r === null) || str_contains($low, 'libur') || $low === 'off';
 
             $hari[] = [
-                'tanggal'       => $d,
-                'is_libur'      => $libur,
-                'nama_shift'    => $shiftNama,
-                'jam_masuk'     => $libur ? null : substr((string) ($r->shift->jam_masuk ?? ''), 0, 5),
-                'jam_keluar'    => $libur ? null : substr((string) ($r->shift->jam_pulang ?? ''), 0, 5),
-                'lembur_masuk'  => $masukByDay[$d] ?? null,
-                'lembur_keluar' => $keluarByDay[$d] ?? null,
+                'tanggal'        => $d,
+                'is_libur'       => $libur,
+                'nama_shift'     => $shiftNama,
+                'jam_masuk'      => $libur ? null : substr((string) ($r->shift->jam_masuk ?? ''), 0, 5),
+                'jam_keluar'     => $libur ? null : substr((string) ($r->shift->jam_pulang ?? ''), 0, 5),
+                'absen_masuk'    => $log?->waktu_masuk  ? $fmtHm($log->waktu_masuk)  : null,
+                'absen_pulang'   => $log?->waktu_pulang ? $fmtHm($log->waktu_pulang) : null,
+                'terlambat_menit' => (int) ($log?->menit_terlambat ?? 0),
+                'lembur_masuk'   => $masukByDay[$d] ?? null,
+                'lembur_keluar'  => $keluarByDay[$d] ?? null,
             ];
         }
 

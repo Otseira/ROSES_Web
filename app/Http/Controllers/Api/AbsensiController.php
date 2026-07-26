@@ -12,9 +12,6 @@ use Illuminate\Support\Facades\Storage;
 
 class AbsensiController extends Controller
 {
-    /**
-     * Logika Absen Masuk (Clock-In) Pegawai
-     */
     public function clockIn(Request $request)
     {
         $request->validate([
@@ -35,7 +32,6 @@ class AbsensiController extends Controller
         $today = Carbon::today()->toDateString();
         $now = Carbon::now();
 
-        // Menggunakan eager loading untuk shift
         $roster = JadwalRoster::with('shift')
             ->where('user_id', $user->id)
             ->where('tanggal_dinas', $today)
@@ -56,7 +52,6 @@ class AbsensiController extends Controller
             ], 422);
         }
 
-        // Ambil pengaturan GPS dari database
         $pengaturan = PengaturanAplikasi::first();
         $hospitalLat = $pengaturan ? (float) $pengaturan->latitude : -0.9471;
         $hospitalLng = $pengaturan ? (float) $pengaturan->longitude : 100.3511;
@@ -82,12 +77,9 @@ class AbsensiController extends Controller
 
         $menitTerlambat = 0;
         if ($now->greaterThan($batasToleransi)) {
-            // ✅ FIX #7: Urutan diffInMinutes yang benar (dari jam shift ke waktu sekarang)
-            // Carbon 3.x: $start->diffInMinutes($end) = positif jika end > start
             $menitTerlambat = $jamMasukShift->diffInMinutes($now);
         }
 
-        // ✅ FIX #8: Handle jika NIK null (fallback ke ID)
         $nik = $user->nik ?? $user->id;
         $file = $request->file('foto');
         $filename = 'in_' . $nik . '_' . time() . '.' . $file->extension();
@@ -116,9 +108,6 @@ class AbsensiController extends Controller
         ], 200);
     }
 
-    /**
-     * Logika Absen Pulang (Clock-Out) Karyawan
-     */
     public function clockOut(Request $request)
     {
         $request->validate([
@@ -155,7 +144,6 @@ class AbsensiController extends Controller
             ], 422);
         }
 
-        // Ambil data roster dan shift langsung dari relasi yang sudah di-load
         $roster = $logAbsen->roster;
         $shift = $roster->shift;
 
@@ -188,11 +176,9 @@ class AbsensiController extends Controller
 
         if ($now->greaterThan($jamPulangShift)) {
             $bisaLembur = true;
-            // ✅ FIX #7: Urutan diffInMinutes yang benar
             $kelebihanWaktuMenit = $jamPulangShift->diffInMinutes($now);
         }
 
-        // ✅ FIX #8: Handle jika NIK null
         $nik = $user->nik ?? $user->id;
         $file = $request->file('foto');
         $filename = 'out_' . $nik . '_' . time() . '.' . $file->extension();
@@ -217,9 +203,6 @@ class AbsensiController extends Controller
         ], 200);
     }
 
-    /**
-     * Fungsi Pembantu: Menghitung Jarak (Haversine Formula)
-     */
     private function calculateDistance(float $lat1, float $lon1, float $lat2, float $lon2): float
     {
         $earthRadius = 6371000; // meter
