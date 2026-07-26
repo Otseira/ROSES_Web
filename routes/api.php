@@ -7,11 +7,13 @@ use App\Http\Controllers\Api\LemburController;
 use App\Http\Controllers\Api\LaporanController;
 use App\Http\Controllers\Api\RosterController;
 use App\Http\Controllers\Api\ProfilController;
+use App\Http\Controllers\Api\PengaturanController;
 
 // ===================================================================
 // RUTE PUBLIK (Bisa diakses dari Flutter tanpa harus login)
 // ===================================================================
 Route::post('/login', [AuthController::class, 'login']);
+Route::get('/branding', [PengaturanController::class, 'branding']);
 
 // ===================================================================
 // RUTE TERPROTEKSI (Flutter wajib mengirimkan Bearer Token Sanctum)
@@ -21,6 +23,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Manajemen Akun
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
+    Route::put('/profil', [ProfilController::class, 'update']);
 
     // ===================================================================
     // KELOMPOK ABSENSI & LEMBUR (Akses Utama Aplikasi Flutter)
