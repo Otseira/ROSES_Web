@@ -37,6 +37,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::put('/profil',          [ProfilController::class, 'update']);
     Route::put('/profil/password', [ProfilController::class, 'updatePassword']);
+    Route::post('/profil/foto',    [ProfilController::class, 'updateFoto']);
     // ===================================================================
     // KELOMPOK OPERASIONAL & LAPORAN (Opsional jika ingin diakses via Mobile)
     // ===================================================================
