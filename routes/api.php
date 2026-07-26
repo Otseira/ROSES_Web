@@ -46,6 +46,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ===================================================================
     Route::get('/roster/unit', [RosterController::class, 'index']);
     Route::post('/roster/bulk-store', [RosterController::class, 'bulkStore']);
+    Route::get('/jadwal-dinas', [RosterController::class, 'jadwalDinas']);
 
     Route::get('/laporan/rekap-bulanan', [LaporanController::class, 'rekapBulanan']);
 });

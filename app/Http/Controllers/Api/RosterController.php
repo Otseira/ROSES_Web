@@ -40,8 +40,8 @@ class RosterController extends Controller
             ->where('id', '!=', $kepalaUnit->id) // Sembunyikan akun Kepala Unit sendiri jika perlu
             ->with(['rosters' => function ($query) use ($bulan, $tahun) {
                 $query->whereMonth('tanggal_dinas', $bulan)
-                      ->whereYear('tanggal_dinas', $tahun)
-                      ->with('shift');
+                    ->whereYear('tanggal_dinas', $tahun)
+                    ->with('shift');
             }])
             ->get();
 
@@ -126,7 +126,6 @@ class RosterController extends Controller
                 'success' => true,
                 'message' => 'Seluruh jadwal roster berhasil disimpan dan dipublikasikan.',
             ], 200);
-
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -134,5 +133,83 @@ class RosterController extends Controller
                 'message' => 'Terjadi kesalahan sistem saat menyimpan jadwal: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Jadwal dinas bulanan (grid per tanggal) untuk user yang login.
+     * GET /api/jadwal-dinas?bulan=&tahun=
+     *
+     * Baris tabel: Tanggal | Jam Masuk (shift) | Jam Keluar (shift)
+     *              | Lembur/On-Call Masuk | Lembur/On-Call Keluar
+     * Tanggal tanpa jadwal dinas => is_libur = true (tampil "Libur").
+     */
+    public function jadwalDinas(Request $request)
+    {
+        $user  = $request->user();
+        $bulan = (int) $request->query('bulan', now()->month);
+        $tahun = (int) $request->query('tahun', now()->year);
+
+        $start = \Carbon\Carbon::createFromDate($tahun, $bulan, 1)->startOfDay();
+        $end   = $start->copy()->endOfMonth();
+        $jumlahHari = $start->daysInMonth;
+
+        // Roster (jadwal shift) per tanggal
+        $rosters = \App\Models\JadwalRoster::with('shift')
+            ->where('user_id', $user->id)
+            ->whereBetween('tanggal_dinas', [$start->toDateString(), $end->toDateString()])
+            ->get()
+            ->keyBy(fn($r) => (int) \Carbon\Carbon::parse($r->tanggal_dinas)->day);
+
+        // Lembur / on-call dalam rentang (masuk = per hari mulai, keluar = per hari selesai)
+        $lembur = \App\Models\LogLembur::where('user_id', $user->id)
+            ->where(function ($q) use ($start, $end) {
+                $q->whereBetween('waktu_mulai_lembur', [$start->toDateTimeString(), $end->toDateTimeString()])
+                    ->orWhereBetween('waktu_selesai_lembur', [$start->toDateTimeString(), $end->toDateTimeString()]);
+            })
+            ->get();
+
+        $fmtHm = fn($t) => $t ? substr(\Carbon\Carbon::parse($t)->format('H:i:s'), 0, 5) : null;
+
+        $masukByDay = [];
+        $keluarByDay = [];
+        foreach ($lembur as $l) {
+            if ($l->waktu_mulai_lembur) {
+                $m = \Carbon\Carbon::parse($l->waktu_mulai_lembur);
+                if ($m->gte($start) && $m->lte($end)) $masukByDay[$m->day] ??= $fmtHm($l->waktu_mulai_lembur);
+            }
+            if ($l->waktu_selesai_lembur) {
+                $s = \Carbon\Carbon::parse($l->waktu_selesai_lembur);
+                if ($s->gte($start) && $s->lte($end)) $keluarByDay[$s->day] ??= $fmtHm($l->waktu_selesai_lembur);
+            }
+        }
+
+        $hari = [];
+        for ($d = 1; $d <= $jumlahHari; $d++) {
+            $r = $rosters[$d] ?? null;
+            $shiftNama = $r?->shift?->nama_shift;
+            $low = strtolower(trim((string) $shiftNama));
+            $libur = ($r === null) || str_contains($low, 'libur') || $low === 'off';
+
+            $hari[] = [
+                'tanggal'       => $d,
+                'is_libur'      => $libur,
+                'nama_shift'    => $shiftNama,
+                'jam_masuk'     => $libur ? null : substr((string) ($r->shift->jam_masuk ?? ''), 0, 5),
+                'jam_keluar'    => $libur ? null : substr((string) ($r->shift->jam_pulang ?? ''), 0, 5),
+                'lembur_masuk'  => $masukByDay[$d] ?? null,
+                'lembur_keluar' => $keluarByDay[$d] ?? null,
+            ];
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'bulan'       => $bulan,
+                'tahun'       => $tahun,
+                'jumlah_hari' => $jumlahHari,
+                'user_nama'   => $user->name,
+                'hari'        => $hari,
+            ],
+        ]);
     }
 }
