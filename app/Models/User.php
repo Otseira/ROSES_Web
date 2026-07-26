@@ -29,9 +29,12 @@ class User extends Authenticatable
         'name',
         'username',
         'nik',
+        'email',         
+        'nomor_whatsapp',
+        'unit_kerja_id', 
         'role',
         'password',
-        'is_active', // <-- TAMBAHKAN INI
+        'is_active',
     ];
 
     /**
