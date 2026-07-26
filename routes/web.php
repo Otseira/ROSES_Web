@@ -44,7 +44,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/roster/bulk-store', [WebRosterController::class, 'bulkStore'])->name('roster.bulk-store');
     Route::get('/monitoring', [WebMonitoringController::class, 'index'])->name('monitoring.index');
 
-    // 4. Master Data (Menggunakan Resource Route yang rapi)
+    // 4. Master Data
     Route::resource('master-pegawai', WebPegawaiController::class, ['names' => 'master-pegawai']);
     Route::resource('master-shift', WebShiftController::class, ['names' => 'master-shift']);
 
@@ -53,11 +53,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/hak-akses/{user}/edit', [WebHakAksesController::class, 'edit'])->name('hak-akses.edit');
     Route::put('/hak-akses/{user}', [WebHakAksesController::class, 'update'])->name('hak-akses.update');
 
-    // 6. Laporan Payroll (Diperbaiki: Duplikasi route dihapus, dikelompokkan dengan prefix)
+    // 6. Laporan Payroll 
     Route::prefix('laporan-payroll')->name('laporan-payroll.')->group(function () {
         Route::get('/', [WebLaporanController::class, 'index'])->name('index');
         Route::get('/excel', [WebLaporanController::class, 'exportExcel'])->name('excel');
         Route::get('/pdf', [WebLaporanController::class, 'exportPdf'])->name('pdf');
+        Route::get('/laporan/lembur', [WebLaporanController::class, 'rekapLembur'])->name('laporan.lembur');
     });
 
     // 7. Pengaturan Aplikasi

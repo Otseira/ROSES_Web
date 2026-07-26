@@ -7,7 +7,7 @@
 
     {{-- ===== HEADER (TIDAK DIUBAH) ===== --}}
     <div class="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-10 gap-6">
-        <div>
+        <!-- <div>
             <h3 class="text-2xl font-extrabold text-slate-800 tracking-tight">Cut-Off: {{
                 \Carbon\Carbon::parse($startDate)->translatedFormat('d M') }} - {{
                 \Carbon\Carbon::parse($endDate)->translatedFormat('d M Y') }}</h3>
@@ -23,7 +23,7 @@
                         '.') }}/jam</span>
                 </div>
             </div>
-        </div>
+        </div> -->
 
         <form method="GET" action="/laporan-payroll" class="flex gap-3 w-full xl:w-auto">
             <select name="bulan"
@@ -52,6 +52,10 @@
             <a href="/laporan-payroll/pdf?bulan={{ $bulan }}&tahun={{ $tahun }}" target="_blank"
                 class="bg-rose-50 text-rose-600 hover:bg-rose-500 hover:text-white border border-rose-200 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center gap-2">
                 <i data-lucide="file-text" class="w-4 h-4"></i> <span class="hidden sm:inline">Cetak PDF</span>
+            </a>
+            <a href="{{ route('laporan.lembur') }}"
+                style="display:inline-block;padding:9px 16px;background:#166534;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">
+                📋 Rekap Lembur / On‑Call
             </a>
         </div>
     </div>

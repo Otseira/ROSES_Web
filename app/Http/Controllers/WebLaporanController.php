@@ -11,10 +11,6 @@ use Carbon\Carbon;
 
 class WebLaporanController extends Controller
 {
-    /**
-     * Fungsi Privat untuk mengumpulkan dan menghitung data laporan
-     * (Agar tidak perlu menulis ulang kode untuk fitur Export)
-     */
     private function generateDataLaporan(Request $request)
     {
         $bulan = $request->input('bulan', date('m'));
@@ -32,7 +28,6 @@ class WebLaporanController extends Controller
         $userLogin = $request->user();
         $isGlobal = in_array($userLogin->role, ['superadmin', 'hrd']);
 
-        // KUNCI UTAMA: Sembunyikan 'superadmin' dari daftar laporan
         $queryUsers = User::with('unitKerja')->where('role', '!=', 'superadmin');
 
         if (!$isGlobal) {
@@ -73,14 +68,8 @@ class WebLaporanController extends Controller
         return compact('users', 'bulan', 'tahun', 'startDate', 'endDate', 'ratePotongan', 'rateLembur');
     }
 
-    /**
-     * ✅ BARU: Membangun detail log absensi harian (dipakai index & PDF agar identik).
-     * Menghitung jarak (radius) tiap absen dari titik RS.
-     */
     private function buildAbsensiDetail($startDate, $endDate)
     {
-        // Koordinat titik RS: ambil dari Pengaturan Aplikasi bila tersedia,
-        // selain itu fallback ke nilai default (aman walau model belum dibuat).
         $hospitalLat = -0.9471;
         $hospitalLng = 100.3511;
         if (class_exists(\App\Models\PengaturanAplikasi::class)) {
@@ -105,28 +94,18 @@ class WebLaporanController extends Controller
             });
     }
 
-    /**
-     * Tampilan Utama Halaman Web Laporan
-     */
     public function index(Request $request)
     {
         $data = $this->generateDataLaporan($request);
-        $absensiDetail = $this->buildAbsensiDetail($data['startDate'], $data['endDate']); // ✅ pakai method bersama
+        $absensiDetail = $this->buildAbsensiDetail($data['startDate'], $data['endDate']);
 
         return view('laporan', array_merge($data, ['absensiDetail' => $absensiDetail]));
     }
 
-    /**
-     * Ekspor Data ke Format Excel (CSV) — TIDAK DIUBAH
-     */
-    /**
-     * Ekspor Data ke Format Excel (CSV) — SEKARANG MENGIKUTI KOLOM WEB/PDF
-     */
     public function exportExcel(Request $request)
     {
         $data = $this->generateDataLaporan($request);
 
-        // ✅ Ambil log harian (sumber yang SAMA dengan web & PDF)
         $absensiDetail = $this->buildAbsensiDetail($data['startDate'], $data['endDate']);
 
         $fileName = 'Rekap_Absensi_' . $data['bulan'] . '_' . $data['tahun'] . '.csv';
@@ -139,15 +118,12 @@ class WebLaporanController extends Controller
             "Expires"             => "0"
         ];
 
-        // Header kolom = SAMA PERSIS dengan header tabel web & PDF
         $columns = ['Nama', 'Jam Masuk', 'Jam Keluar', 'Tanggal', 'Radius (m)', 'Latitude', 'Longitude'];
 
-        // Helper format
         $fmtJam   = fn($t) => $t ? Carbon::parse($t)->format('H:i') : '-';
         $fmtTgl   = fn($t) => $t ? Carbon::parse($t)->format('d/m/Y') : '-';
         $fmtCoord = fn($v) => ($v === null || $v === '') ? '-' : number_format((float)$v, 4, '.', '');
 
-        // Radius: gabung Masuk / Pulang dalam satu sel (konsisten dengan web)
         $radiusPair = function ($m, $p) {
             $f = fn($v) => ($v === null || $v === '') ? null : number_format((float)$v, 0, ',', '.');
             $a = $f($m);
@@ -158,7 +134,6 @@ class WebLaporanController extends Controller
             return '-';
         };
 
-        // Koordinat: gabung Masuk / Pulang dalam satu sel
         $coordPair = function ($m, $p) use ($fmtCoord) {
             $a = $fmtCoord($m);
             $b = $fmtCoord($p);
@@ -169,7 +144,6 @@ class WebLaporanController extends Controller
         $callback = function () use ($absensiDetail, $columns, $fmtJam, $fmtTgl, $radiusPair, $coordPair) {
             $file = fopen('php://output', 'w');
 
-            // BOM UTF-8 agar Excel membaca karakter Indonesia dengan benar
             fwrite($file, "\xEF\xBB\xBF");
 
             fputcsv($file, $columns); // Header
@@ -194,13 +168,9 @@ class WebLaporanController extends Controller
         return response()->stream($callback, 200, $headers);
     }
 
-    /**
-     * Ekspor Data ke PDF (via Print View)
-     */
     public function exportPdf(Request $request)
     {
         $data = $this->generateDataLaporan($request);
-        // ✅ PERBAIKAN: bangun & kirim 'absensiDetail' (sama persis dengan index)
         $absensiDetail = $this->buildAbsensiDetail($data['startDate'], $data['endDate']);
 
         return view('laporan-pdf', array_merge($data, ['absensiDetail' => $absensiDetail]));
@@ -214,5 +184,103 @@ class WebLaporanController extends Controller
         $lonDelta = deg2rad($lon2 - $lon1);
         $a = sin($latDelta / 2) * sin($latDelta / 2) + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($lonDelta / 2) * sin($lonDelta / 2);
         return round($earthRadius * 2 * atan2(sqrt($a), sqrt(1 - $a)));
+    }
+
+    public function rekapLembur(Request $request)
+    {
+        $me   = $request->user();
+        $role = $me->role;
+
+        if (!in_array($role, ['superadmin', 'hrd', 'kepala_unit', 'penanggung_jawab'])) {
+            abort(403, 'Anda tidak memiliki akses rekap lembur.');
+        }
+
+        $bulan        = (int) $request->query('bulan', now()->month);
+        $tahun        = (int) $request->query('tahun', now()->year);
+        $statusFilter = $request->query('status'); // opsional: Pending|Disetujui|Ditolak
+
+        $q = \App\Models\LogLembur::with(['user.unitKerja']);
+
+        if (in_array($role, ['kepala_unit', 'penanggung_jawab'])) {
+            $myUnit = $me->unit_kerja_id;
+            $q->whereHas('user', function ($u) use ($myUnit) {
+                $u->where('unit_kerja_id', $myUnit);
+            });
+        }
+
+        $q->whereYear('waktu_mulai_lembur', $tahun)
+            ->whereMonth('waktu_mulai_lembur', $bulan);
+
+        if (!empty($statusFilter)) {
+            $q->where('status_validasi', $statusFilter);
+        }
+
+        $items = $q->orderByDesc('waktu_mulai_lembur')->get();
+
+        $set  = \App\Models\PengaturanAplikasi::first();
+        $sLat = $set ? (float) $set->latitude  : null;
+        $sLng = $set ? (float) $set->longitude : null;
+
+        $rows = [];
+        $totalJamDisetujui = 0.0;
+        $jmlPending = 0;
+
+        foreach ($items as $l) {
+            $lat = $l->latitude_masuk  ?? $l->latitude_keluar;
+            $lng = $l->longitude_masuk ?? $l->longitude_keluar;
+            $jarak = null;
+            if ($lat !== null && $lng !== null && $sLat !== null && $sLng !== null) {
+                $jarak = $this->haversine((float) $lat, (float) $lng, $sLat, $sLng);
+            }
+
+            if (($l->status_validasi ?? '') === 'Disetujui') $totalJamDisetujui += (float) ($l->total_jam_lembur ?? 0);
+            if (($l->status_validasi ?? '') === 'Pending')   $jmlPending++;
+
+            $rows[] = [
+                'nama'       => $l->user->name ?? '-',
+                'nik'        => $l->user->nik ?? '-',
+                'unit'       => $l->user->unitKerja->nama_unit ?? '-',
+                'jenis'      => $l->jenis_lembur ?? '-',
+                'tanggal'    => $l->waktu_mulai_lembur ? \Carbon\Carbon::parse($l->waktu_mulai_lembur)->format('d M Y') : '-',
+                'jam_masuk'  => $l->waktu_mulai_lembur ? \Carbon\Carbon::parse($l->waktu_mulai_lembur)->format('H:i') : '-',
+                'jam_keluar' => $l->waktu_selesai_lembur ? \Carbon\Carbon::parse($l->waktu_selesai_lembur)->format('H:i') : '-',
+                'durasi'     => $l->total_jam_lembur !== null ? number_format((float) $l->total_jam_lembur, 2, ',', '.') . ' jam' : '-',
+                'jarak'      => $this->fmtJarak($jarak),
+                'status'     => $l->status_validasi ?? '-',
+                'alasan'     => $l->keterangan ?? '-',
+            ];
+        }
+
+        $units = in_array($role, ['hrd', 'superadmin'])
+            ? \App\Models\MasterUnitKerja::orderBy('nama_unit')->get()
+            : collect();
+
+        return view('web.laporan.rekap-lembur', [
+            'rows'              => $rows,
+            'bulan'             => $bulan,
+            'tahun'             => $tahun,
+            'statusFilter'      => $statusFilter,
+            'role'              => $role,
+            'units'             => $units,
+            'totalPengajuan'    => count($rows),
+            'totalJamDisetujui' => $totalJamDisetujui,
+            'jmlPending'        => $jmlPending,
+        ]);
+    }
+
+    private function haversine($lat1, $lon1, $lat2, $lon2)
+    {
+        $R    = 6371000;
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLon = deg2rad($lon2 - $lon1);
+        $a    = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2) ** 2;
+        return $R * 2 * atan2(sqrt($a), sqrt(1 - $a));
+    }
+
+    private function fmtJarak($m)
+    {
+        if ($m === null) return '-';
+        if ($m >= 1000) return number_format($m / 1000, 2, ',', '.') . ' km';
+        return round($m) . ' m';
     }
 }
