@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AbsensiController;
 use App\Http\Controllers\Api\LemburController;
 use App\Http\Controllers\Api\LaporanController;
 use App\Http\Controllers\Api\RosterController;
+use App\Http\Controllers\Api\ProfilController;
 
 // ===================================================================
 // RUTE PUBLIK (Bisa diakses dari Flutter tanpa harus login)
@@ -34,6 +35,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/lembur/validasi', [LemburController::class, 'listValidasi']);
     Route::post('/lembur/validasi/{id}', [LemburController::class, 'prosesValidasi']);
 
+    Route::put('/profil',          [ProfilController::class, 'update']);
+    Route::put('/profil/password', [ProfilController::class, 'updatePassword']);
     // ===================================================================
     // KELOMPOK OPERASIONAL & LAPORAN (Opsional jika ingin diakses via Mobile)
     // ===================================================================
