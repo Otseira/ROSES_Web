@@ -94,10 +94,42 @@ class WebLaporanController extends Controller
             });
     }
 
+    private function buildAbsensiDetailBulanan($tahun, $bulan)
+    {
+        $start = Carbon::createFromDate($tahun, $bulan, 1)->startOfDay();
+        $end   = $start->copy()->endOfMonth()->endOfDay();
+
+        $hospitalLat = -0.9471;
+        $hospitalLng = 100.3511;
+        if (class_exists(\App\Models\PengaturanAplikasi::class)) {
+            $pa = \App\Models\PengaturanAplikasi::first();
+            if ($pa) {
+                if ($pa->latitude  !== null) $hospitalLat = (float) $pa->latitude;
+                if ($pa->longitude !== null) $hospitalLng = (float) $pa->longitude;
+            }
+        }
+
+        return LogAbsensi::with(['roster.user'])
+            ->where(function ($q) use ($start, $end) {
+                $q->whereBetween('waktu_masuk',  [$start->toDateTimeString(), $end->toDateTimeString()])
+                    ->orWhereBetween('waktu_pulang', [$start->toDateTimeString(), $end->toDateTimeString()]);
+            })
+            ->orderBy('waktu_masuk')
+            ->get()
+            ->map(function ($log) use ($hospitalLat, $hospitalLng) {
+                $log->jarak_masuk  = $this->calculateDistance($log->latitude_masuk, $log->longitude_masuk, $hospitalLat, $hospitalLng);
+                $log->jarak_pulang = $log->latitude_pulang
+                    ? $this->calculateDistance($log->latitude_pulang, $log->longitude_pulang, $hospitalLat, $hospitalLng)
+                    : null;
+                return $log;
+            });
+    }
+
     public function index(Request $request)
     {
         $data = $this->generateDataLaporan($request);
-        $absensiDetail = $this->buildAbsensiDetail($data['startDate'], $data['endDate']);
+
+        $absensiDetail = $this->buildAbsensiDetailBulanan((int) $data['tahun'], (int) $data['bulan']);
 
         return view('laporan.laporan', array_merge($data, ['absensiDetail' => $absensiDetail]));
     }
