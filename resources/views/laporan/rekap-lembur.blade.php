@@ -42,7 +42,7 @@
     </div>
 
     {{-- Filter --}}
-    <form method="GET" action="{{ route('laporan.lembur') }}"
+    <form method="GET" action="{{ route('laporan-payroll.lembur') }}"
           style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
         <div>
             <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px">Bulan</label>

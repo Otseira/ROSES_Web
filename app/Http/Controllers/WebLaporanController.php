@@ -99,7 +99,7 @@ class WebLaporanController extends Controller
         $data = $this->generateDataLaporan($request);
         $absensiDetail = $this->buildAbsensiDetail($data['startDate'], $data['endDate']);
 
-        return view('laporan', array_merge($data, ['absensiDetail' => $absensiDetail]));
+        return view('laporan.laporan', array_merge($data, ['absensiDetail' => $absensiDetail]));
     }
 
     public function exportExcel(Request $request)
@@ -173,7 +173,7 @@ class WebLaporanController extends Controller
         $data = $this->generateDataLaporan($request);
         $absensiDetail = $this->buildAbsensiDetail($data['startDate'], $data['endDate']);
 
-        return view('laporan-pdf', array_merge($data, ['absensiDetail' => $absensiDetail]));
+        return view('laporan.laporan-pdf', array_merge($data, ['absensiDetail' => $absensiDetail]));
     }
 
     private function calculateDistance($lat1, $lon1, $lat2, $lon2)
@@ -255,7 +255,7 @@ class WebLaporanController extends Controller
             ? \App\Models\MasterUnitKerja::orderBy('nama_unit')->get()
             : collect();
 
-        return view('web.laporan.rekap-lembur', [
+        return view('laporan.rekap-lembur', [
             'rows'              => $rows,
             'bulan'             => $bulan,
             'tahun'             => $tahun,

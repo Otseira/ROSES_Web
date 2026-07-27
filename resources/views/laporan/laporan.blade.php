@@ -53,7 +53,7 @@
                 class="bg-rose-50 text-rose-600 hover:bg-rose-500 hover:text-white border border-rose-200 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center gap-2">
                 <i data-lucide="file-text" class="w-4 h-4"></i> <span class="hidden sm:inline">Cetak PDF</span>
             </a>
-            <a href="{{ route('laporan.lembur') }}"
+            <a href="/laporan-payroll/lembur"
                 style="display:inline-block;padding:9px 16px;background:#166534;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">
                 📋 Rekap Lembur / On‑Call
             </a>

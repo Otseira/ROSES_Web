@@ -58,7 +58,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/', [WebLaporanController::class, 'index'])->name('index');
         Route::get('/excel', [WebLaporanController::class, 'exportExcel'])->name('excel');
         Route::get('/pdf', [WebLaporanController::class, 'exportPdf'])->name('pdf');
-        Route::get('/laporan/lembur', [WebLaporanController::class, 'rekapLembur'])->name('laporan.lembur');
+        Route::get('/lembur', [WebLaporanController::class, 'rekapLembur'])->name('lembur');
     });
 
     // 7. Pengaturan Aplikasi
