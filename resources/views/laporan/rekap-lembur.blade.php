@@ -2,6 +2,8 @@
 @section('title', 'Rekapitulasi Laporan Lembur/On Call')
 @section('page_title', 'Rekap Lembur/On Call')
 
+@section('content')
+
 @php
     $namaBulan = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
     $thNow = (int) date('Y');
