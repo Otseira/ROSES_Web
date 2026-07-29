@@ -38,6 +38,8 @@ Route::middleware('auth')->group(function () {
 
     // 2. Dashboard
     Route::get('/dashboard', [WebDashboardController::class, 'index'])->name('dashboard');
+    Route::get('/dashboard/ringkasan-karyawan', [WebDashboardController::class, 'ringkasanKaryawan'])->name('dashboard.ringkasanKaryawan');
+    Route::get('/dashboard/karyawan-hari-ini',  [WebDashboardController::class, 'karyawanHariIni'])->name('dashboard.karyawanHariIni');
 
     // 3. Operasional (Roster & Monitoring)
     Route::get('/roster', [WebRosterController::class, 'index'])->name('roster.index');
