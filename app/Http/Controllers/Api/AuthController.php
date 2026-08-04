@@ -61,6 +61,9 @@ class AuthController extends Controller
                 'nomor_whatsapp' => $user->nomor_whatsapp,
                 'unit_kerja' => $user->unitKerja ? $user->unitKerja->nama_unit : null,
                 'role' => $user->role,
+                'foto_profil' => $user->foto_profil                       // ✅
+                    ? rtrim((string) config('app.url'), '/') . '/storage/' . $user->foto_profil
+                    : null,
                 'manages_units' => $managesUnits, // <-- DATA BARU
             ]
         ], 200);
@@ -69,9 +72,13 @@ class AuthController extends Controller
     /**
      * Mengambil data profil pegawai yang sedang login
      */
+    /**
+     * Mengambil data profil pegawai yang sedang login (SELALU DATA TERBARU)
+     */
     public function me(Request $request)
     {
         $user = $request->user()->load('unitKerja');
+        $base = rtrim((string) config('app.url'), '/');
 
         $managesUnits = [];
         if ($user->isManajemen()) {
@@ -86,17 +93,21 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
-                'id' => $user->id,
-                'nik' => $user->nik,
-                'username' => $user->username,
-                'nama' => $user->name,
-                'unit_kerja' => $user->unitKerja ? $user->unitKerja->nama_unit : null,
-                'role' => $user->role,
-                'manages_units' => $managesUnits, // <-- DATA BARU
-            ]
+                'id'             => $user->id,
+                'nik'            => $user->nik,
+                'username'       => $user->username,
+                'nama'           => $user->name,
+                'email'          => $user->email,               // ✅ DITAMBAHKAN
+                'nomor_whatsapp' => $user->nomor_whatsapp,      // ✅ DITAMBAHKAN
+                'unit_kerja'     => $user->unitKerja ? $user->unitKerja->nama_unit : null,
+                'role'           => $user->role,
+                'foto_profil'    => $user->foto_profil          // ✅ DITAMBAHKAN (URL lengkap)
+                    ? $base . '/storage/' . $user->foto_profil
+                    : null,
+                'manages_units'  => $managesUnits,
+            ],
         ], 200);
     }
-
     /**
      * Logika Logout Pegawai
      */
