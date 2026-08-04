@@ -15,20 +15,17 @@ class AuthController extends Controller
      */
     public function login(Request $request)
     {
-        // 1. Validasi Input Klien (Sekarang menggunakan 'login' untuk Username/NIK)
         $request->validate([
             'login' => 'required|string',
             'password' => 'required|string',
         ]);
 
-        // 2. Cari user berdasarkan Username ATAU NIK, beserta relasi Unit Kerja
         $user = User::with('unitKerja')
             ->where(function ($q) use ($request) {
                 $q->where('username', $request->login)
                     ->orWhere('nik', $request->login);
             })->first();
 
-        // 3. Verifikasi keberadaan user dan kecocokan password
         if (! $user || ! Hash::check($request->password, $user->password)) {
             return response()->json([
                 'success' => false,
@@ -36,13 +33,20 @@ class AuthController extends Controller
             ], 401);
         }
 
-        // 4. Hapus token lama jika ada (mencegah double login)
         $user->tokens()->delete();
-
-        // 5. Buat token baru menggunakan Laravel Sanctum
         $token = $user->createToken('auth_token')->plainTextToken;
 
-        // 6. Kembalikan JSON Response yang selaras dengan sistem RBAC baru
+        // Load relasi managesUnits untuk user yang punya role manajemen
+        $managesUnits = [];
+        if ($user->isManajemen()) {
+            $managesUnits = $user->managesUnits->map(function ($unit) {
+                return [
+                    'id' => $unit->id,
+                    'nama_unit' => $unit->nama_unit,
+                ];
+            })->toArray();
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Login berhasil.',
@@ -56,7 +60,8 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'nomor_whatsapp' => $user->nomor_whatsapp,
                 'unit_kerja' => $user->unitKerja ? $user->unitKerja->nama_unit : null,
-                'role' => $user->role, // Menggantikan hak_akses/moduls
+                'role' => $user->role,
+                'manages_units' => $managesUnits, // <-- DATA BARU
             ]
         ], 200);
     }
@@ -66,8 +71,17 @@ class AuthController extends Controller
      */
     public function me(Request $request)
     {
-        // Mengambil user saat ini beserta unit kerjanya
         $user = $request->user()->load('unitKerja');
+
+        $managesUnits = [];
+        if ($user->isManajemen()) {
+            $managesUnits = $user->managesUnits->map(function ($unit) {
+                return [
+                    'id' => $unit->id,
+                    'nama_unit' => $unit->nama_unit,
+                ];
+            })->toArray();
+        }
 
         return response()->json([
             'success' => true,
@@ -78,6 +92,7 @@ class AuthController extends Controller
                 'nama' => $user->name,
                 'unit_kerja' => $user->unitKerja ? $user->unitKerja->nama_unit : null,
                 'role' => $user->role,
+                'manages_units' => $managesUnits, // <-- DATA BARU
             ]
         ], 200);
     }
@@ -87,7 +102,6 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
-        // Hapus token yang sedang digunakan saat ini dari database
         $request->user()->currentAccessToken()->delete();
 
         return response()->json([

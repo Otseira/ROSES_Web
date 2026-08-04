@@ -22,8 +22,6 @@ class User extends Authenticatable
 
     /**
      * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
      */
     protected $fillable = [
         'name',
@@ -39,8 +37,6 @@ class User extends Authenticatable
 
     /**
      * The attributes that should be hidden for serialization.
-     *
-     * @var array<int, string>
      */
     protected $hidden = [
         'password',
@@ -49,62 +45,54 @@ class User extends Authenticatable
 
     /**
      * The attributes that should be cast.
-     *
-     * @var array<string, string>
      */
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
-        'is_active' => 'boolean', // <-- TAMBAHKAN INI agar otomatis jadi true/false
+        'is_active' => 'boolean',
     ];
 
-    // ===== RELASI ASLI (WAJIB ADA — ini yang bikin login error kalau hilang) =====
+    // ===== RELASI DASAR =====
 
-    // Pegawai bernaung di bawah satu unit kerja
     public function unitKerja(): BelongsTo
     {
         return $this->belongsTo(MasterUnitKerja::class, 'unit_kerja_id');
     }
 
-    // ACL: satu pegawai bisa mengakses banyak modul via tabel jembatan akses_users
     public function moduls(): BelongsToMany
     {
         return $this->belongsToMany(MasterModul::class, 'akses_users', 'user_id', 'modul_id')
             ->withTimestamps();
     }
 
-    // Riwayat jadwal roster
     public function rosters(): HasMany
     {
         return $this->hasMany(JadwalRoster::class, 'user_id');
     }
 
-    // Riwayat log lembur
     public function lemburs(): HasMany
     {
         return $this->hasMany(LogLembur::class, 'user_id');
     }
 
-    // ===== RELASI TAMBAHAN (untuk fitur Laporan / Rekap) =====
-
-    // Semua log absensi milik user (melalui roster)
     public function logAbsensis(): HasManyThrough
     {
         return $this->hasManyThrough(
             LogAbsensi::class,
             JadwalRoster::class,
-            'user_id',   // FK di jadwal_rosters
-            'roster_id', // FK di log_absensis
-            'id',        // local key users
-            'id'         // local key jadwal_rosters
+            'user_id',
+            'roster_id',
+            'id',
+            'id'
         );
     }
 
-    // Alias log lembur (kompatibilitas dengan LaporanController)
     public function logLemburs(): HasMany
     {
         return $this->hasMany(LogLembur::class, 'user_id');
     }
+
+    // ===== RELASI BARU: Unit yang Dikelola (Multi-Unit) =====
 
     public function managesUnits(): BelongsToMany
     {
@@ -114,5 +102,47 @@ class User extends Authenticatable
             'user_id',
             'master_unit_kerja_id'
         )->withTimestamps();
+    }
+
+    // ===== HELPER METHODS =====
+
+    /**
+     * Cek apakah user ini adalah role manajemen (bisa kelola multi-unit)
+     */
+    public function isManajemen(): bool
+    {
+        return in_array($this->role, ['kepala_unit', 'penanggung_jawab', 'manajer']);
+    }
+
+    /**
+     * Cek apakah user ini adalah Direktur (akses global)
+     */
+    public function isDirektur(): bool
+    {
+        return $this->role === 'direktur';
+    }
+
+    /**
+     * Cek apakah user ini adalah HRD
+     */
+    public function isHrd(): bool
+    {
+        return $this->role === 'hrd';
+    }
+
+    /**
+     * Cek apakah user ini adalah Superadmin
+     */
+    public function isSuperadmin(): bool
+    {
+        return $this->role === 'superadmin';
+    }
+
+    /**
+     * Cek apakah user memiliki akses global (Direktur, HRD, atau Superadmin)
+     */
+    public function hasGlobalAccess(): bool
+    {
+        return $this->isDirektur() || $this->isHrd() || $this->isSuperadmin();
     }
 }
