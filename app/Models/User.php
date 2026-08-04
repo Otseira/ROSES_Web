@@ -29,9 +29,9 @@ class User extends Authenticatable
         'name',
         'username',
         'nik',
-        'email',         
+        'email',
         'nomor_whatsapp',
-        'unit_kerja_id', 
+        'unit_kerja_id',
         'role',
         'password',
         'is_active',
@@ -104,5 +104,15 @@ class User extends Authenticatable
     public function logLemburs(): HasMany
     {
         return $this->hasMany(LogLembur::class, 'user_id');
+    }
+
+    public function managesUnits(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            MasterUnitKerja::class,
+            'unit_kerja_users',
+            'user_id',
+            'master_unit_kerja_id'
+        )->withTimestamps();
     }
 }

@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\MasterUnitKerja;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 
 class WebPegawaiController extends Controller
 {
@@ -36,27 +37,26 @@ class WebPegawaiController extends Controller
     {
         $userLogin = $request->user();
 
-        // 1. Jika yang login adalah Superadmin atau HRD, mereka BEBAS memilih & melihat semua unit kerja
+        // Role yang bisa mengelola banyak unit
+        $rolesManajemen = ['kepala_unit', 'penanggung_jawab', 'manajer'];
+
         if ($userLogin->role === 'superadmin' || $userLogin->role === 'hrd') {
             $unitKerja = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
         } else {
-            // 2. Jika Kepala Unit / Penanggung Jawab, dropdown DIKUNCI hanya untuk unit kerja mereka sendiri
+            // Dropdown dikunci hanya untuk unit kerja mereka sendiri
             $unitKerja = MasterUnitKerja::where('id', $userLogin->unit_kerja_id)->get();
         }
 
-        // KUNCI COBA (Bypass): Jika dropdown masih kosong saat uji coba, matikan if-else di atas 
-        // dan aktifkan baris di bawah ini untuk memaksa semua unit muncul:
-        // $unitKerja = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
-
         return view('pegawai.create', compact('unitKerja'));
     }
+
 
     /**
      * Menyimpan data pegawai baru (Store)
      */
     public function store(Request $request)
     {
-        // Validasi data input tanpa master modul
+        // Tambahkan 'manajer' dan 'direktur' ke validasi role
         $request->validate([
             'nik' => 'required|string|unique:users,nik|max:20',
             'username' => 'required|string|max:50|unique:users,username',
@@ -64,21 +64,30 @@ class WebPegawaiController extends Controller
             'email' => 'required|email|unique:users,email',
             'nomor_whatsapp' => 'nullable|string|max:20',
             'unit_kerja_id' => 'required|exists:master_unit_kerjas,id',
-            'role' => 'required|string|in:staf,kepala_unit,penanggung_jawab,hrd,superadmin', // Validasi Role langsung
+            'role' => 'required|string|in:staf,kepala_unit,penanggung_jawab,manajer,direktur,hrd,superadmin',
             'password' => 'required|string|min:6',
+            'manages_units' => 'nullable|array', // <-- Validasi array unit yang dikelola
+            'manages_units.*' => 'exists:master_unit_kerjas,id',
         ]);
 
-        // Simpan data User baru ke database
-        User::create([
-            'nik' => $request->nik,
-            'username' => $request->username,
-            'name' => $request->name,
-            'email' => $request->email,
-            'nomor_whatsapp' => $request->nomor_whatsapp,
-            'unit_kerja_id' => $request->unit_kerja_id,
-            'role' => $request->role, // Menyimpan role langsung
-            'password' => Hash::make($request->password),
-        ]);
+        DB::transaction(function () use ($request) {
+            $user = User::create([
+                'nik' => $request->nik,
+                'username' => $request->username,
+                'name' => $request->name,
+                'email' => $request->email,
+                'nomor_whatsapp' => $request->nomor_whatsapp,
+                'unit_kerja_id' => $request->unit_kerja_id,
+                'role' => $request->role,
+                'password' => Hash::make($request->password),
+            ]);
+
+            // Jika role adalah Manajer, Kepala Unit, atau Penanggung Jawab, simpan unit yang dikelola
+            $rolesManajemen = ['kepala_unit', 'penanggung_jawab', 'manajer'];
+            if (in_array($request->role, $rolesManajemen) && $request->has('manages_units')) {
+                $user->managesUnits()->sync($request->manages_units);
+            }
+        });
 
         return redirect('/master-pegawai')->with('success', 'Data pegawai baru berhasil ditambahkan.');
     }
@@ -88,7 +97,6 @@ class WebPegawaiController extends Controller
      */
     public function edit(User $master_pegawai)
     {
-        // Mengambil semua unit kerja untuk kebutuhan edit data
         $unitKerja = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
         return view('pegawai.edit', compact('master_pegawai', 'unitKerja'));
     }
@@ -105,24 +113,35 @@ class WebPegawaiController extends Controller
             'email' => 'required|email|unique:users,email,' . $master_pegawai->id,
             'nomor_whatsapp' => 'nullable|string|max:20',
             'unit_kerja_id' => 'required|exists:master_unit_kerjas,id',
-            'role' => 'required|string|in:staf,kepala_unit,penanggung_jawab,hrd,superadmin',
+            'role' => 'required|string|in:staf,kepala_unit,penanggung_jawab,manajer,direktur,hrd,superadmin',
+            'manages_units' => 'nullable|array',
+            'manages_units.*' => 'exists:master_unit_kerjas,id',
         ]);
 
-        // Update data dasar
-        $master_pegawai->update([
-            'nik' => $request->nik,
-            'username' => $request->username,
-            'name' => $request->name,
-            'email' => $request->email,
-            'nomor_whatsapp' => $request->nomor_whatsapp,
-            'unit_kerja_id' => $request->unit_kerja_id,
-            'role' => $request->role,
-        ]);
+        DB::transaction(function () use ($request, $master_pegawai) {
+            $master_pegawai->update([
+                'nik' => $request->nik,
+                'username' => $request->username,
+                'name' => $request->name,
+                'email' => $request->email,
+                'nomor_whatsapp' => $request->nomor_whatsapp,
+                'unit_kerja_id' => $request->unit_kerja_id,
+                'role' => $request->role,
+            ]);
 
-        // Jika password diisi, ganti password
-        if ($request->filled('password')) {
-            $master_pegawai->update(['password' => Hash::make($request->password)]);
-        }
+            if ($request->filled('password')) {
+                $master_pegawai->update(['password' => Hash::make($request->password)]);
+            }
+
+            // Sinkronisasi unit yang dikelola
+            $rolesManajemen = ['kepala_unit', 'penanggung_jawab', 'manajer'];
+            if (in_array($request->role, $rolesManajemen)) {
+                $master_pegawai->managesUnits()->sync($request->manages_units ?? []);
+            } else {
+                // Jika role diubah ke staf/direktur/hrd, hapus semua relasi unit yang dikelola
+                $master_pegawai->managesUnits()->detach();
+            }
+        });
 
         return redirect('/master-pegawai')->with('success', 'Data pegawai berhasil diperbarui.');
     }

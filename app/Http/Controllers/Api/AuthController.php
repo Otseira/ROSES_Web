@@ -23,9 +23,10 @@ class AuthController extends Controller
 
         // 2. Cari user berdasarkan Username ATAU NIK, beserta relasi Unit Kerja
         $user = User::with('unitKerja')
-            ->where('username', $request->login)
-            ->orWhere('nik', $request->login)
-            ->first();
+            ->where(function ($q) use ($request) {
+                $q->where('username', $request->login)
+                    ->orWhere('nik', $request->login);
+            })->first();
 
         // 3. Verifikasi keberadaan user dan kecocokan password
         if (! $user || ! Hash::check($request->password, $user->password)) {
@@ -67,7 +68,7 @@ class AuthController extends Controller
     {
         // Mengambil user saat ini beserta unit kerjanya
         $user = $request->user()->load('unitKerja');
-        
+
         return response()->json([
             'success' => true,
             'data' => [
