@@ -25,7 +25,7 @@ class ProfilController extends Controller
                 'string',
                 'min:3',
                 'max:50',
-                'alpha_dash', // Hanya huruf, angka, dash, underscore
+                'alpha_dash',
                 Rule::unique('users', 'username')->ignore($user->id),
             ],
             'email'          => [
@@ -38,7 +38,7 @@ class ProfilController extends Controller
         ]);
 
         $user->name           = $request->nama;
-        $user->username       = $request->username; // <-- TAMBAHAN BARU
+        $user->username       = $request->username;
         $user->email          = $request->email;
         $user->nomor_whatsapp = $request->nomor_whatsapp;
         $user->save();
@@ -77,10 +77,50 @@ class ProfilController extends Controller
     }
 
     /**
+     * Update foto profil.
+     * POST /api/profil/foto  (multipart/form-data, field: "foto")
+     */
+    public function updateFoto(Request $request)
+    {
+        $request->validate([
+            'foto' => 'required|image|mimes:jpeg,png,jpg|max:2048',
+        ]);
+
+        $user = $request->user();
+
+        // Hapus foto lama dari storage agar tidak menumpuk
+        if ($user->foto_profil && Storage::disk('public')->exists($user->foto_profil)) {
+            Storage::disk('public')->delete($user->foto_profil);
+        }
+
+        // Simpan foto baru ke storage/app/public/foto-profil
+        $path = $request->file('foto')->store('foto-profil', 'public');
+
+        $user->foto_profil = $path;
+        $user->save();
+
+        $baseUrl = rtrim((string) config('app.url'), '/');
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Foto profil berhasil diperbarui.',
+            'data' => [
+                'foto_profil' => $path,
+                'foto_url'    => $baseUrl . '/storage/' . $path,
+            ],
+        ], 200);
+    }
+
+    /**
      * Format data user untuk response JSON
      */
     private function formatUser($user)
     {
+        $baseUrl = rtrim((string) config('app.url'), '/');
+        $fotoUrl = $user->foto_profil
+            ? $baseUrl . '/storage/' . $user->foto_profil
+            : null;
+
         return [
             'id'              => $user->id,
             'nik'             => $user->nik,
@@ -90,6 +130,7 @@ class ProfilController extends Controller
             'nomor_whatsapp'  => $user->nomor_whatsapp,
             'unit_kerja'      => $user->unitKerja?->nama_unit,
             'role'            => $user->role,
+            'foto_profil'     => $fotoUrl, // <-- agar Flutter langsung dapat URL lengkap
         ];
     }
 }

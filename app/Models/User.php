@@ -33,6 +33,7 @@ class User extends Authenticatable
         'role',
         'password',
         'is_active',
+        'foto_profil', // <-- TAMBAHKAN INI
     ];
 
     /**
