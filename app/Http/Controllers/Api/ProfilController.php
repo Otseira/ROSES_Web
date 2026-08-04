@@ -5,21 +5,40 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class ProfilController extends Controller
 {
-    /** Perbarui data pribadi: nama, email, nomor_whatsapp.  PUT /api/profil */
+    /** 
+     * Perbarui data pribadi: nama, username, email, nomor_whatsapp.  
+     * PUT /api/profil 
+     */
     public function update(Request $request)
     {
         $user = $request->user();
 
         $request->validate([
             'nama'           => 'required|string|max:255',
-            'email'          => 'nullable|email|max:255|unique:users,email,' . $user->id,
+            'username'       => [
+                'required',
+                'string',
+                'min:3',
+                'max:50',
+                'alpha_dash', // Hanya huruf, angka, dash, underscore
+                Rule::unique('users', 'username')->ignore($user->id),
+            ],
+            'email'          => [
+                'nullable',
+                'email',
+                'max:255',
+                Rule::unique('users', 'email')->ignore($user->id),
+            ],
             'nomor_whatsapp' => 'nullable|string|max:20',
         ]);
 
         $user->name           = $request->nama;
+        $user->username       = $request->username; // <-- TAMBAHAN BARU
         $user->email          = $request->email;
         $user->nomor_whatsapp = $request->nomor_whatsapp;
         $user->save();
@@ -31,7 +50,10 @@ class ProfilController extends Controller
         ], 200);
     }
 
-    /** Ganti password.  PUT /api/profil/password */
+    /** 
+     * Ganti password.  
+     * PUT /api/profil/password 
+     */
     public function updatePassword(Request $request)
     {
         $request->validate([
@@ -48,53 +70,26 @@ class ProfilController extends Controller
         $user->password = Hash::make($request->new_password);
         $user->save();
 
-        return response()->json(['success' => true, 'message' => 'Password berhasil diubah.'], 200);
-    }
-
-    /** ✅ BARU — Upload / ganti foto profil.  POST /api/profil/foto  (multipart: field "foto") */
-    public function updateFoto(Request $request)
-    {
-        $request->validate([
-            'foto' => 'required|image|mimes:jpeg,png,jpg|max:2048',
-        ]);
-
-        $user = $request->user();
-        $file = $request->file('foto');
-
-        // Hapus foto lama dari storage (bila ada) agar tidak menumpuk
-        if ($user->foto_profil) {
-            \Illuminate\Support\Facades\Storage::disk('public')->delete($user->foto_profil);
-        }
-
-        $nik  = $user->nik ?? $user->id;
-        $name = 'profil_' . preg_replace('/[^a-zA-Z0-9]/', '', (string) $nik) . '_' . time() . '.' . $file->extension();
-        $path = $file->storeAs('foto_profil', $name, 'public');
-
-        $user->foto_profil = $path;
-        $user->save();
-
         return response()->json([
             'success' => true,
-            'message' => 'Foto profil berhasil diperbarui.',
-            'data'    => $this->formatUser($user->fresh()),
+            'message' => 'Password berhasil diganti.',
         ], 200);
     }
 
-    /** Format user konsisten dengan /me & UserModel Flutter (termasuk URL foto). */
+    /**
+     * Format data user untuk response JSON
+     */
     private function formatUser($user)
     {
-        $user->load('unitKerja');
-        $base = rtrim((string) config('app.url'), '/');
         return [
-            'id'             => $user->id,
-            'nik'            => $user->nik,
-            'username'       => $user->username,
-            'nama'           => $user->name,
-            'email'          => $user->email,
-            'nomor_whatsapp' => $user->nomor_whatsapp,
-            'unit_kerja'     => $user->unitKerja?->nama_unit,
-            'role'           => $user->role,
-            'foto_profil'    => $user->foto_profil ? ($base . '/storage/' . $user->foto_profil) : null,
+            'id'              => $user->id,
+            'nik'             => $user->nik,
+            'username'        => $user->username,
+            'nama'            => $user->name,
+            'email'           => $user->email,
+            'nomor_whatsapp'  => $user->nomor_whatsapp,
+            'unit_kerja'      => $user->unitKerja?->nama_unit,
+            'role'            => $user->role,
         ];
     }
 }
