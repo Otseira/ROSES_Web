@@ -73,12 +73,16 @@ class AbsensiController extends Controller
 
         $shift = $roster->shift;
         $jamMasukShift = Carbon::parse($today . ' ' . $shift->jam_masuk);
-        $batasToleransi = $jamMasukShift->copy()->addMinutes($shift->toleransi_terlambat_menit);
+        $toleransi = (int) $shift->toleransi_terlambat_menit;
 
-        $menitTerlambat = 0;
-        if ($now->greaterThan($batasToleransi)) {
-            $menitTerlambat = $jamMasukShift->diffInMinutes($now);
-        }
+        // ============================================================
+        // ✅ PERBAIKAN: hitung selisih dalam MENIT PENUH (detik dibuang)
+        // 08:05:59 => 5 menit → 5 > 5 = FALSE → TIDAK terlambat
+        // 08:06:00 => 6 menit → 6 > 5 = TRUE  → TERLAMBAT
+        // ============================================================
+        $menitSelisih = intdiv(max(0, $now->getTimestamp() - $jamMasukShift->getTimestamp()), 60);
+
+        $menitTerlambat = ($menitSelisih > $toleransi) ? $menitSelisih : 0;
 
         $nik = $user->nik ?? $user->id;
         $file = $request->file('foto');

@@ -211,96 +211,106 @@ class LemburController extends Controller
     }
 
     /**
-     * 4. DAFTAR LEMBUR UNTUK VALIDASI (scoped by role/unit)
-     *    GET /api/lembur/validasi?status=Pending
+     * Daftar lembur yang menunggu validasi + riwayat
+     * Akses: hrd, superadmin, direktur, kepala_unit, penanggung_jawab
      */
     public function listValidasi(Request $request)
     {
         $user = $request->user();
-        if (!in_array($user->role, ['kepala_unit', 'hrd', 'superadmin'])) {
-            return response()->json(['success' => false, 'message' => 'Anda tidak memiliki akses validasi.'], 403);
+
+        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'hrd', 'superadmin', 'direktur'];
+        if (!in_array($user->role, $roleAllowed)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anda tidak memiliki hak akses untuk melakukan validasi lembur.',
+            ], 403);
         }
 
-        $status = $request->query('status', 'Pending'); // Pending | Disetujui | Ditolak
+        // Kepala Unit & Penanggung Jawab hanya melihat lembur unit yang dikelola
+        $scopeUnit = function ($q) use ($user) {
+            if (in_array($user->role, ['kepala_unit', 'penanggung_jawab'])) {
+                $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
+                if ($unitIds->isEmpty()) {
+                    $unitIds = collect([$user->unit_kerja_id]);
+                }
+                $q->whereHas('user', fn($qq) => $qq->whereIn('unit_kerja_id', $unitIds));
+            }
+        };
 
-        $query = LogLembur::with(['user.unitKerja'])
-            ->where('status_validasi', $status)
-            ->orderByDesc('waktu_mulai_lembur');
+        $menunggu = LogLembur::with('user.unitKerja')
+            ->where('status_validasi', 'Menunggu')
+            ->tap($scopeUnit)
+            ->latest('waktu_mulai_lembur')
+            ->get();
 
-        // kepala_unit hanya melihat unitnya sendiri
-        if ($user->role === 'kepala_unit') {
-            $query->whereHas('user', function ($q) use ($user) {
-                $q->where('unit_kerja_id', $user->unit_kerja_id);
-            });
-        }
-
-        $fotoUrl = fn($p) => $p ? rtrim(config('app.url'), '/') . '/storage/' . $p : null;
-
-        $data = $query->get()->map(function ($l) use ($fotoUrl) {
-            return [
-                'id'              => $l->id,
-                'jenis_lembur'    => $l->jenis_lembur,
-                'status_validasi' => $l->status_validasi,
-                'pegawai_nama'    => $l->user->name ?? '-',
-                'pegawai_nik'     => $l->user->nik ?? '-',
-                'unit_nama'       => $l->user->unitKerja->nama_unit ?? '-',
-                'waktu_mulai'     => $l->waktu_mulai_lembur,
-                'waktu_selesai'   => $l->waktu_selesai_lembur,
-                'total_jam'       => $l->total_jam_lembur,
-                'keterangan'      => $l->keterangan,
-                'foto_masuk_url'  => $fotoUrl($l->foto_masuk),
-                'foto_keluar_url' => $fotoUrl($l->foto_keluar),
-                'lat_masuk'       => $l->latitude_masuk,
-                'lng_masuk'       => $l->longitude_masuk,
-                'lat_keluar'      => $l->latitude_keluar,
-                'lng_keluar'      => $l->longitude_keluar,
-                'divalidasi_oleh' => $l->divalidasi_oleh,
-                'divalidasi_pada' => $l->divalidasi_pada,
-                'catatan_validasi' => $l->catatan_validasi,
-            ];
-        });
-
-        return response()->json(['success' => true, 'data' => $data], 200);
-    }
-
-    /**
-     * 5. SETUJUI / TOLAK LEMBUR
-     *    POST /api/lembur/validasi/{id}   body: { action: 'Disetujui'|'Ditolak', catatan?: '...' }
-     */
-    public function prosesValidasi(Request $request, $id)
-    {
-        $request->validate([
-            'action'  => 'required|in:Disetujui,Ditolak',
-            'catatan' => 'nullable|string|max:255',
-        ]);
-
-        $user = $request->user();
-        if (!in_array($user->role, ['kepala_unit', 'hrd', 'superadmin'])) {
-            return response()->json(['success' => false, 'message' => 'Anda tidak memiliki akses validasi.'], 403);
-        }
-
-        $lembur = LogLembur::with('user')->findOrFail($id);
-
-        // kepala_unit hanya boleh validasi unitnya sendiri
-        if ($user->role === 'kepala_unit' && (int) $lembur->user->unit_kerja_id !== (int) $user->unit_kerja_id) {
-            return response()->json(['success' => false, 'message' => 'Lembur ini bukan dari unit kerja Anda.'], 403);
-        }
-
-        if ($lembur->status_validasi !== 'Pending') {
-            return response()->json(['success' => false, 'message' => 'Lembur ini sudah divalidasi sebelumnya (' . $lembur->status_validasi . ').'], 422);
-        }
-
-        $lembur->update([
-            'status_validasi'  => $request->action,
-            'divalidasi_oleh'  => $user->id,
-            'divalidasi_pada'  => now(),
-            'catatan_validasi' => $request->catatan,
-        ]);
+        $riwayat = LogLembur::with('user.unitKerja')
+            ->where('status_validasi', '!=', 'Menunggu')
+            ->tap($scopeUnit)
+            ->latest('waktu_mulai_lembur')
+            ->limit(50)
+            ->get();
 
         return response()->json([
             'success' => true,
-            'message' => 'Lembur berhasil ' . strtolower($request->action) . '.',
-            'data' => ['id' => $lembur->id, 'status_validasi' => $lembur->status_validasi],
+            'data' => [
+                'menunggu' => $menunggu,
+                'riwayat'  => $riwayat,
+            ],
+        ], 200);
+    }
+
+    /**
+     * Proses validasi (approve / reject) lembur
+     */
+    public function prosesValidasi(Request $request, $id)
+    {
+        $user = $request->user();
+
+        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'hrd', 'superadmin', 'direktur'];
+        if (!in_array($user->role, $roleAllowed)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anda tidak memiliki hak akses untuk melakukan validasi lembur.',
+            ], 403);
+        }
+
+        $request->validate([
+            'status'           => 'required|in:Disetujui,Ditolak',
+            'catatan_validasi' => 'nullable|string|max:500',
+        ]);
+
+        $lembur = LogLembur::with('user')->findOrFail($id);
+
+        // Kepala Unit & PJ hanya bisa validasi lembur dari unit yang dikelola
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab'])) {
+            $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
+            if ($unitIds->isEmpty()) {
+                $unitIds = collect([$user->unit_kerja_id]);
+            }
+            if (!in_array($lembur->user->unit_kerja_id, $unitIds->all())) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Lembur ini bukan dari unit yang Anda kelola.',
+                ], 403);
+            }
+        }
+
+        if ($lembur->status_validasi !== 'Menunggu') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Lembur ini sudah divalidasi sebelumnya.',
+            ], 422);
+        }
+
+        $lembur->status_validasi  = $request->status;
+        $lembur->catatan_validasi = $request->catatan_validasi;
+        $lembur->divalidasi_oleh  = $user->id;
+        $lembur->divalidasi_pada  = now();
+        $lembur->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Lembur berhasil divalidasi.',
         ], 200);
     }
 }
