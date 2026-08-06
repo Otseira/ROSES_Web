@@ -10,16 +10,12 @@ use Illuminate\Validation\Rule;
 
 class ProfilController extends Controller
 {
-    /** 
-     * Perbarui data pribadi: nama, username, email, nomor_whatsapp.  
-     * PUT /api/profil 
-     */
     public function update(Request $request)
     {
         $user = $request->user();
 
         $request->validate([
-            'nama'           => 'required|string|max:255',
+            'nama'           => 'nullable|string|max:255',
             'username'       => [
                 'required',
                 'string',
@@ -37,6 +33,10 @@ class ProfilController extends Controller
             'nomor_whatsapp' => 'nullable|string|max:20',
         ]);
 
+        if ($request->filled('nik')) {
+            $user->nik = $request->nik;
+        }
+
         $user->name           = $request->nama;
         $user->username       = $request->username;
         $user->email          = $request->email;
@@ -50,10 +50,6 @@ class ProfilController extends Controller
         ], 200);
     }
 
-    /** 
-     * Ganti password.  
-     * PUT /api/profil/password 
-     */
     public function updatePassword(Request $request)
     {
         $request->validate([
@@ -76,10 +72,6 @@ class ProfilController extends Controller
         ], 200);
     }
 
-    /**
-     * Update foto profil.
-     * POST /api/profil/foto  (multipart/form-data, field: "foto")
-     */
     public function updateFoto(Request $request)
     {
         $request->validate([
@@ -88,12 +80,10 @@ class ProfilController extends Controller
 
         $user = $request->user();
 
-        // Hapus foto lama dari storage agar tidak menumpuk
         if ($user->foto_profil && Storage::disk('public')->exists($user->foto_profil)) {
             Storage::disk('public')->delete($user->foto_profil);
         }
 
-        // Simpan foto baru ke storage/app/public/foto-profil
         $path = $request->file('foto')->store('foto-profil', 'public');
 
         $user->foto_profil = $path;
@@ -111,9 +101,6 @@ class ProfilController extends Controller
         ], 200);
     }
 
-    /**
-     * Format data user untuk response JSON
-     */
     private function formatUser($user)
     {
         $baseUrl = rtrim((string) config('app.url'), '/');
@@ -130,7 +117,7 @@ class ProfilController extends Controller
             'nomor_whatsapp'  => $user->nomor_whatsapp,
             'unit_kerja'      => $user->unitKerja?->nama_unit,
             'role'            => $user->role,
-            'foto_profil'     => $fotoUrl, // <-- agar Flutter langsung dapat URL lengkap
+            'foto_profil'     => $fotoUrl,
         ];
     }
 }
