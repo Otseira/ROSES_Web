@@ -56,33 +56,32 @@ class WebPegawaiController extends Controller
      */
     public function store(Request $request)
     {
-        // Tambahkan 'manajer' dan 'direktur' ke validasi role
         $request->validate([
-            'nik' => 'required|string|unique:users,nik|max:20',
-            'username' => 'required|string|max:50|unique:users,username',
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email',
+            'nik'            => 'nullable|string|max:20|unique:users,nik',
+            'email'          => 'nullable|email|max:255|unique:users,email',
             'nomor_whatsapp' => 'nullable|string|max:20',
-            'unit_kerja_id' => 'required|exists:master_unit_kerjas,id',
-            'role' => 'required|string|in:staf,kepala_unit,penanggung_jawab,manajer,direktur,hrd,superadmin',
-            'password' => 'required|string|min:6',
-            'manages_units' => 'nullable|array', // <-- Validasi array unit yang dikelola
+            'username'       => 'required|string|max:50|unique:users,username',
+            'name'           => 'required|string|max:255',
+            'unit_kerja_id'  => 'required|exists:master_unit_kerjas,id',
+            'role'           => 'required|string|in:staf,kepala_unit,penanggung_jawab,manajer,direktur,hrd,superadmin',
+            'password'       => 'required|string|min:6',
+
+            'manages_units'   => 'nullable|array',
             'manages_units.*' => 'exists:master_unit_kerjas,id',
         ]);
 
         DB::transaction(function () use ($request) {
             $user = User::create([
-                'nik' => $request->nik,
-                'username' => $request->username,
-                'name' => $request->name,
-                'email' => $request->email,
-                'nomor_whatsapp' => $request->nomor_whatsapp,
-                'unit_kerja_id' => $request->unit_kerja_id,
-                'role' => $request->role,
-                'password' => Hash::make($request->password),
+                'nik'            => $request->nik,             // boleh null
+                'username'       => $request->username,
+                'name'           => $request->name,
+                'email'          => $request->email,           // boleh null
+                'nomor_whatsapp' => $request->nomor_whatsapp,  // boleh null
+                'unit_kerja_id'  => $request->unit_kerja_id,
+                'role'           => $request->role,
+                'password'       => Hash::make($request->password),
             ]);
 
-            // Jika role adalah Manajer, Kepala Unit, atau Penanggung Jawab, simpan unit yang dikelola
             $rolesManajemen = ['kepala_unit', 'penanggung_jawab', 'manajer'];
             if (in_array($request->role, $rolesManajemen) && $request->has('manages_units')) {
                 $user->managesUnits()->sync($request->manages_units);
@@ -107,7 +106,7 @@ class WebPegawaiController extends Controller
     public function update(Request $request, User $master_pegawai)
     {
         $request->validate([
-            'nik' => 'required|string|max:20|unique:users,nik,' . $master_pegawai->id,
+            'nik' => 'nullable|string|max:20|unique:users,nik,' . $master_pegawai->id,
             'username' => 'required|string|max:50|unique:users,username,' . $master_pegawai->id,
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email,' . $master_pegawai->id,
