@@ -35,7 +35,7 @@
 
             <div>
                 <label class="block text-sm font-bold text-slate-700 mb-2">NIK Karyawan</label>
-                <input type="text" name="nik" value="{{ old('nik', $master_pegawai->nik) }}" required
+                <input type="text" name="nik" value="{{ old('nik', $master_pegawai->nik) }}"
                     class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 outline-none transition-all text-sm font-semibold text-slate-800">
                 @error('nik') <span class="text-xs text-rose-500 font-semibold mt-1 block">{{ $message }}</span>
                 @enderror
@@ -59,7 +59,7 @@
 
             <div>
                 <label class="block text-sm font-bold text-slate-700 mb-2">Email Utama</label>
-                <input type="email" name="email" value="{{ old('email', $master_pegawai->email) }}" required
+                <input type="email" name="email" value="{{ old('email', $master_pegawai->email) }}"
                     class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 outline-none transition-all text-sm font-semibold text-slate-800">
                 @error('email') <span class="text-xs text-rose-500 font-semibold mt-1 block">{{ $message }}</span>
                 @enderror
