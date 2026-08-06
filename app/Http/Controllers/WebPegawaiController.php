@@ -106,38 +106,38 @@ class WebPegawaiController extends Controller
     public function update(Request $request, User $master_pegawai)
     {
         $request->validate([
-            'nik' => 'nullable|string|max:20|unique:users,nik,' . $master_pegawai->id,
-            'username' => 'required|string|max:50|unique:users,username,' . $master_pegawai->id,
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email,' . $master_pegawai->id,
+            'nik'            => 'nullable|string|max:20|unique:users,nik,' . $master_pegawai->id,
+            'email'          => 'nullable|email|max:255|unique:users,email,' . $master_pegawai->id,
             'nomor_whatsapp' => 'nullable|string|max:20',
+            'username'      => 'required|string|max:50|unique:users,username,' . $master_pegawai->id,
+            'name'          => 'required|string|max:255',
             'unit_kerja_id' => 'required|exists:master_unit_kerjas,id',
-            'role' => 'required|string|in:staf,kepala_unit,penanggung_jawab,manajer,direktur,hrd,superadmin',
-            'manages_units' => 'nullable|array',
+            'role'          => 'required|string|in:staf,kepala_unit,penanggung_jawab,manajer,direktur,hrd,superadmin',
+            'password'      => 'nullable|string|min:6',
+
+            'manages_units'   => 'nullable|array',
             'manages_units.*' => 'exists:master_unit_kerjas,id',
         ]);
 
         DB::transaction(function () use ($request, $master_pegawai) {
             $master_pegawai->update([
-                'nik' => $request->nik,
-                'username' => $request->username,
-                'name' => $request->name,
-                'email' => $request->email,
+                'nik'            => $request->nik,
+                'username'       => $request->username,
+                'name'           => $request->name,
+                'email'          => $request->email,
                 'nomor_whatsapp' => $request->nomor_whatsapp,
-                'unit_kerja_id' => $request->unit_kerja_id,
-                'role' => $request->role,
+                'unit_kerja_id'  => $request->unit_kerja_id,
+                'role'           => $request->role,
             ]);
 
             if ($request->filled('password')) {
                 $master_pegawai->update(['password' => Hash::make($request->password)]);
             }
 
-            // Sinkronisasi unit yang dikelola
             $rolesManajemen = ['kepala_unit', 'penanggung_jawab', 'manajer'];
             if (in_array($request->role, $rolesManajemen)) {
                 $master_pegawai->managesUnits()->sync($request->manages_units ?? []);
             } else {
-                // Jika role diubah ke staf/direktur/hrd, hapus semua relasi unit yang dikelola
                 $master_pegawai->managesUnits()->detach();
             }
         });
