@@ -17,11 +17,9 @@ class WebPegawaiController extends Controller
     {
         $userLogin = $request->user();
 
-        // Query dasar mengambil user beserta unit kerjanya
-        $query = User::with('unitKerja');
+        $query = User::with(['unitKerja', 'managesUnits']);
 
-        // Jika yang login BUKAN superadmin dan BUKAN hrd (misal: Kepala Unit / Penanggung Jawab)
-        // Maka mereka hanya bisa melihat pegawai yang ada di unit kerja mereka sendiri
+        // Jika yang login BUKAN superadmin dan BUKAN hrd
         if ($userLogin->role !== 'superadmin' && $userLogin->role !== 'hrd') {
             $query->where('unit_kerja_id', $userLogin->unit_kerja_id);
         }
