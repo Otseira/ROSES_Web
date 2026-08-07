@@ -48,17 +48,6 @@
                 </div>
             </div>
         </div>
-        <div class="bg-white rounded-2xl border border-slate-100/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-5">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><i
-                        data-lucide="timer" class="w-5 h-5"></i></div>
-                <div>
-                    <p class="text-[0.65rem] font-black uppercase tracking-widest text-slate-400">Jam Lembur</p>
-                    <p class="text-xl font-extrabold text-blue-600">{{ number_format($stats['jam_lembur'], 1) }} <span
-                            class="text-xs font-bold text-slate-400">jam</span></p>
-                </div>
-            </div>
-        </div>
     </div>
 
     {{-- ===== TABEL REKAP ===== --}}
@@ -98,7 +87,7 @@
                     class="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-200 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all">
                     <i data-lucide="sheet" class="w-4 h-4"></i> Excel
                 </a>
-                <a href="/laporan-payroll/pdf?bulan={{ $bulan }}&tahun={{ $tahun }}&unit={{ $unit }}"
+                <a href="/laporan-payroll/pdf?bulan={{ $bulan }}&tahun={{ $tahun }}&unit={{ $unit }}" target="_blank"
                     class="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all">
                     <i data-lucide="file-text" class="w-4 h-4"></i> Cetak PDF
                 </a>
