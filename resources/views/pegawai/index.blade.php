@@ -31,8 +31,17 @@ $roleColors = [
         class="p-8 border-b border-slate-100/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white">
         <div>
             <h3 class="text-xl font-extrabold text-slate-800 tracking-tight">Daftar Tenaga Medis & Staf</h3>
-            <p class="text-sm text-slate-500 font-medium mt-1">Total {{ $pegawai->count() }} pegawai terdaftar. Kelola
-                data personal dan otorisasi sistem.</p>
+            <p class="text-sm text-slate-500 font-medium mt-1">
+                Menampilkan <span class="font-bold text-slate-700">{{ $pegawai->count() }}</span> pegawai
+                @if(request('unit'))
+                dari unit <span class="font-bold text-primary">{{ $units->firstWhere('id', request('unit'))?->nama_unit
+                    }}</span>
+                @endif
+                @if(request('q'))
+                dengan kata kunci "<span class="font-bold text-primary">{{ request('q') }}</span>"
+                @endif
+                — kelola data personal dan otorisasi sistem.
+            </p>
         </div>
         <div class="flex flex-wrap gap-3">
             <a href="/master-pegawai/import"
@@ -44,6 +53,44 @@ $roleColors = [
                 <i data-lucide="plus" class="w-4 h-4"></i> Tambah Pegawai
             </a>
         </div>
+    </div>
+
+    {{-- ✅ FILTER BAR: Unit Kerja + Pencarian --}}
+    <div class="px-8 py-5 border-b border-slate-100/80 bg-slate-50/40">
+        <form method="GET" action="/master-pegawai" class="flex flex-col lg:flex-row gap-3 lg:items-center">
+            {{-- Filter Unit Kerja --}}
+            <div class="flex items-center gap-2">
+                <i data-lucide="filter" class="w-4 h-4 text-slate-400"></i>
+                <select name="unit" onchange="this.form.submit()"
+                    class="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer">
+                    <option value="">🏢 Semua Unit ({{ $units->count() }} unit)</option>
+                    @foreach($units as $u)
+                    <option value="{{ $u->id }}" {{ request('unit')==$u->id ? 'selected' : '' }}>
+                        {{ $u->nama_unit }}
+                    </option>
+                    @endforeach
+                </select>
+            </div>
+
+            {{-- Pencarian nama / username --}}
+            <div class="flex-1 flex gap-2">
+                <div class="relative flex-1 max-w-md">
+                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2"></i>
+                    <input type="text" name="q" value="{{ request('q') }}" placeholder="Cari nama atau username..."
+                        class="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-primary/20">
+                </div>
+                <button type="submit"
+                    class="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95">
+                    Cari
+                </button>
+                @if(request('unit') || request('q'))
+                <a href="/master-pegawai"
+                    class="bg-white border border-slate-200 text-slate-500 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4"></i> Reset
+                </a>
+                @endif
+            </div>
+        </form>
     </div>
 
     {{-- Flash Success --}}
@@ -108,10 +155,8 @@ $roleColors = [
                             <div>
                                 <div class="text-sm font-bold text-slate-800">{{ $p->name }}</div>
                                 <div class="text-xs font-semibold text-slate-400 mt-0.5">
-                                    <span class="text-slate-500"> {{ $p->username }}</span>
-                                    @if($p->nik)
-                                    · NIK {{ $p->nik }}
-                                    @endif
+                                    <span class="text-slate-500">{{ $p->username }}</span>
+                                    @if($p->nik) · NIK {{ $p->nik }} @endif
                                 </div>
                             </div>
                         </div>
@@ -126,7 +171,7 @@ $roleColors = [
                         </span>
                     </td>
 
-                    {{-- ✅ Hak Akses --}}
+                    {{-- Hak Akses --}}
                     <td class="px-8 py-5 whitespace-nowrap">
                         <span
                             class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold border {{ $roleColors[$p->role] ?? 'bg-slate-100 text-slate-600 border-slate-200/50' }}">
@@ -134,7 +179,7 @@ $roleColors = [
                         </span>
                     </td>
 
-                    {{-- ✅ Unit yang Dikelola --}}
+                    {{-- Unit yang Dikelola --}}
                     <td class="px-8 py-5">
                         @forelse($p->managesUnits as $unit)
                         <span
@@ -188,8 +233,14 @@ $roleColors = [
                             <div class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center">
                                 <i data-lucide="users" class="w-8 h-8 text-slate-400"></i>
                             </div>
-                            <p class="text-sm font-bold text-slate-600">Belum ada data pegawai</p>
-                            <p class="text-xs text-slate-400">Tambahkan pegawai baru atau import via CSV</p>
+                            <p class="text-sm font-bold text-slate-600">Tidak ada data pegawai</p>
+                            <p class="text-xs text-slate-400">
+                                @if(request('unit') || request('q'))
+                                Coba ubah filter atau reset pencarian
+                                @else
+                                Tambahkan pegawai baru atau import via CSV
+                                @endif
+                            </p>
                         </div>
                     </td>
                 </tr>

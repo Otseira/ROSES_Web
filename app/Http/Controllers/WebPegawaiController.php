@@ -19,13 +19,26 @@ class WebPegawaiController extends Controller
 
         $query = User::with(['unitKerja', 'managesUnits']);
 
-        // Jika yang login BUKAN superadmin dan BUKAN hrd
         if ($userLogin->role !== 'superadmin' && $userLogin->role !== 'hrd') {
             $query->where('unit_kerja_id', $userLogin->unit_kerja_id);
         }
 
+        if ($request->filled('unit')) {
+            $query->where('unit_kerja_id', $request->unit);
+        }
+
+        if ($request->filled('q')) {
+            $query->where(function ($q) use ($request) {
+                $q->where('name', 'like', '%' . $request->q . '%')
+                    ->orWhere('username', 'like', '%' . $request->q . '%');
+            });
+        }
+
         $pegawai = $query->latest()->get();
-        return view('pegawai.index', compact('pegawai'));
+
+        $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
+
+        return view('pegawai.index', compact('pegawai', 'units'));
     }
 
     /**
