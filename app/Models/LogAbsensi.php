@@ -24,13 +24,16 @@ class LogAbsensi extends Model
         'ip_address_pulang',
     ];
 
-    // Mengubah string datetime menjadi objek Carbon agar mudah dimanipulasi logikanya di backend
     protected $casts = [
         'waktu_masuk' => 'datetime',
         'waktu_pulang' => 'datetime',
     ];
 
-    // Relasi: Log absensi ini merujuk ke satu jadwal roster dinas tertentu
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
     public function roster(): BelongsTo
     {
         return $this->belongsTo(JadwalRoster::class, 'roster_id');
