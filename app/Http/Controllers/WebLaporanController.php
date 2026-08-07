@@ -9,9 +9,6 @@ use Illuminate\Http\Request;
 
 class WebLaporanController extends Controller
 {
-    /**
-     * Halaman rekap: absensi + lembur/on-call dalam satu tampilan
-     */
     public function index(Request $request)
     {
         $bulan = (int) $request->input('bulan', now()->month);
@@ -22,9 +19,6 @@ class WebLaporanController extends Controller
         return view('laporan.laporan', compact('bulan', 'tahun', 'logs', 'lemburs'));
     }
 
-    /**
-     * Export EXCEL (CSV kompatibel Excel) — kolom sama dengan layar
-     */
     public function exportExcel(Request $request)
     {
         $bulan = (int) $request->input('bulan', now()->month);
@@ -35,7 +29,7 @@ class WebLaporanController extends Controller
         $rows = [];
         $rows[] = ['REKAP ABSENSI & LEMBUR - ' . strtoupper(now()->month($bulan)->translatedFormat('F Y'))];
         $rows[] = [];
-        $rows[] = ['Nama', 'Tanggal', 'Jam Masuk', 'Jam Keluar', 'Jarak Masuk (m)', 'Jarak Pulang (m)', 'Foto Masuk', 'Foto Keluar', 'Lembur / On-Call'];
+        $rows[] = ['Nama', 'Tanggal', 'Jam Masuk', 'Jam Keluar', 'Jarak ke Pusat (m)', 'Lembur / On-Call'];
 
         foreach ($logs as $log) {
             $nama = $log->user?->name ?? $log->roster?->user?->name ?? '-';
@@ -55,30 +49,11 @@ class WebLaporanController extends Controller
                 optional($log->waktu_masuk)->format('d/m/Y') ?? '-',
                 optional($log->waktu_masuk)->format('H:i') ?? '-',
                 optional($log->waktu_pulang)->format('H:i') ?? '-',
-                $log->jarak_masuk ?? '-',
-                $log->jarak_pulang ?? '-',
-                $log->foto_masuk ? url('/storage/' . $log->foto_masuk) : '-',
-                $log->foto_pulang ? url('/storage/' . $log->foto_pulang) : '-',
+                $log->jarak ?? '-',
                 $lemburText,
             ];
         }
 
-        // ===== Blok rekap lembur / on-call =====
-        $rows[] = [];
-        $rows[] = ['REKAP LEMBUR / ON-CALL'];
-        $rows[] = ['Nama', 'Jenis', 'Mulai', 'Selesai', 'Total Jam', 'Status'];
-        foreach ($lemburs->flatten() as $l) {
-            $rows[] = [
-                $l->user?->name ?? '-',
-                $l->jenis_lembur,
-                optional($l->waktu_mulai_lembur)->format('d/m/Y H:i'),
-                optional($l->waktu_selesai_lembur)->format('d/m/Y H:i') ?? '-',
-                number_format($l->total_jam_lembur ?? 0, 1),
-                $l->status_validasi,
-            ];
-        }
-
-        // BOM UTF-8 agar terbuka rapi di Excel (pemisah ; untuk Excel Indonesia)
         $csv = "\xEF\xBB\xBF";
         foreach ($rows as $row) {
             $csv .= implode(';', array_map(fn($c) => '"' . str_replace('"', '""', (string) $c) . '"', $row)) . "\n";
@@ -90,9 +65,6 @@ class WebLaporanController extends Controller
         ]);
     }
 
-    /**
-     * Export PDF — layout sama dengan layar
-     */
     public function exportPdf(Request $request)
     {
         $bulan = (int) $request->input('bulan', now()->month);
@@ -100,15 +72,9 @@ class WebLaporanController extends Controller
 
         [$logs, $lemburs] = $this->buildData($bulan, $tahun);
 
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('laporan.pdf', compact('bulan', 'tahun', 'logs', 'lemburs'))
-            ->setPaper('a4', 'landscape');
-
-        return $pdf->download('rekap-absensi-' . $tahun . '-' . str_pad($bulan, 2, '0', STR_PAD_LEFT) . '.pdf');
+        return view('laporan.pdf', compact('bulan', 'tahun', 'logs', 'lemburs'));
     }
 
-    /**
-     * Ambil data absensi + lembur satu periode, hitung jarak dari titik server
-     */
     private function buildData(int $bulan, int $tahun)
     {
         $pengaturan = PengaturanAplikasi::first();
@@ -127,6 +93,9 @@ class WebLaporanController extends Controller
                 $log->jarak_pulang = is_numeric($log->latitude_pulang)
                     ? round($this->haversine($lat, $lng, (float) $log->latitude_pulang, (float) $log->longitude_pulang))
                     : null;
+
+                $log->jarak = $log->jarak_masuk ?? $log->jarak_pulang;
+
                 return $log;
             });
 
@@ -140,7 +109,6 @@ class WebLaporanController extends Controller
         return [$logs, $lemburs];
     }
 
-    /** Jarak (meter) antara titik kantor dan titik absen */
     private function haversine($lat1, $lon1, $lat2, $lon2): float
     {
         $R = 6371000;

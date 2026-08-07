@@ -38,10 +38,10 @@
         </div>
     </div>
 
-    {{-- ===== TABEL ABSENSI ===== --}}
+    {{-- ===== SATU TABEL REKAP ===== --}}
     <h4 class="font-extrabold text-slate-800 mb-4">Detail Log Absensi Harian — {{
         now()->month($bulan)->translatedFormat('F Y') }}</h4>
-    <div class="overflow-x-auto rounded-2xl border border-slate-100 mb-10">
+    <div class="overflow-x-auto rounded-2xl border border-slate-100">
         <table class="w-full text-left">
             <thead>
                 <tr class="bg-slate-50 text-slate-500 text-[0.7rem] font-black uppercase tracking-widest">
@@ -49,7 +49,7 @@
                     <th class="px-6 py-4">Tanggal</th>
                     <th class="px-6 py-4">Jam Masuk</th>
                     <th class="px-6 py-4">Jam Keluar</th>
-                    <th class="px-6 py-4">Jarak Absen (M / P)</th>
+                    <th class="px-6 py-4">Jarak ke Pusat</th>
                     <th class="px-6 py-4">Foto Masuk</th>
                     <th class="px-6 py-4">Foto Keluar</th>
                     <th class="px-6 py-4">Lembur / On-Call</th>
@@ -70,10 +70,12 @@
                         optional($log->waktu_masuk)->format('H:i') ?? '-' }}</td>
                     <td class="px-6 py-4 text-sm font-semibold text-slate-600">{{
                         optional($log->waktu_pulang)->format('H:i') ?? '-' }}</td>
+
+                    {{-- ✅ SATU NILAI JARAK ke pusat radius server --}}
                     <td class="px-6 py-4 text-sm font-semibold text-slate-600">
-                        M: {{ $log->jarak_masuk !== null ? $log->jarak_masuk . ' m' : '-' }}<br>
-                        P: {{ $log->jarak_pulang !== null ? $log->jarak_pulang . ' m' : '-' }}
+                        {{ $log->jarak !== null ? $log->jarak . ' m' : '-' }}
                     </td>
+
                     <td class="px-6 py-4">
                         @if($log->foto_masuk)
                         <a href="{{ url('/storage/' . $log->foto_masuk) }}" target="_blank">
@@ -108,50 +110,6 @@
                 <tr>
                     <td colspan="8" class="px-6 py-12 text-center text-sm text-slate-400 font-semibold">Belum ada data
                         absensi pada periode ini.</td>
-                </tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-
-    {{-- ===== TABEL LEMBUR / ON-CALL ===== --}}
-    <h4 class="font-extrabold text-slate-800 mb-4">Rekap Lembur / On-Call — {{ now()->month($bulan)->translatedFormat('F
-        Y') }}</h4>
-    <div class="overflow-x-auto rounded-2xl border border-slate-100">
-        <table class="w-full text-left">
-            <thead>
-                <tr class="bg-slate-50 text-slate-500 text-[0.7rem] font-black uppercase tracking-widest">
-                    <th class="px-6 py-4">Nama</th>
-                    <th class="px-6 py-4">Jenis</th>
-                    <th class="px-6 py-4">Mulai</th>
-                    <th class="px-6 py-4">Selesai</th>
-                    <th class="px-6 py-4">Total Jam</th>
-                    <th class="px-6 py-4">Status</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">
-                @forelse($lemburs->flatten() as $l)
-                <tr class="hover:bg-slate-50/60 transition-all">
-                    <td class="px-6 py-4 text-sm font-bold text-slate-800">{{ $l->user?->name ?? '-' }}</td>
-                    <td class="px-6 py-4 text-sm font-semibold text-slate-600">{{ $l->jenis_lembur }}</td>
-                    <td class="px-6 py-4 text-sm font-semibold text-slate-600">{{
-                        optional($l->waktu_mulai_lembur)->format('d M Y H:i') }}</td>
-                    <td class="px-6 py-4 text-sm font-semibold text-slate-600">{{
-                        optional($l->waktu_selesai_lembur)->format('d M Y H:i') ?? '-' }}</td>
-                    <td class="px-6 py-4 text-sm font-semibold text-slate-600">{{ number_format($l->total_jam_lembur ??
-                        0, 1) }} jam</td>
-                    <td class="px-6 py-4">
-                        <span
-                            class="px-3 py-1 rounded-full text-[11px] font-bold
-                            {{ $l->status_validasi == 'Disetujui' ? 'bg-emerald-50 text-emerald-600' : ($l->status_validasi == 'Ditolak' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600') }}">
-                            {{ $l->status_validasi }}
-                        </span>
-                    </td>
-                </tr>
-                @empty
-                <tr>
-                    <td colspan="6" class="px-6 py-12 text-center text-sm text-slate-400 font-semibold">Tidak ada
-                        lembur/on-call pada periode ini.</td>
                 </tr>
                 @endforelse
             </tbody>
