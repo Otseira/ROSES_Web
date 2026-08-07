@@ -33,6 +33,9 @@ class WebLaporanController extends Controller
         return view('laporan.laporan', compact('bulan', 'tahun', 'unit', 'logs', 'lemburs', 'stats', 'units'));
     }
 
+    /**
+     * Export EXCEL — kolom Lembur & On-Call TERPISAH (dalam satuan menit)
+     */
     public function exportExcel(Request $request)
     {
         $bulan = (int) $request->input('bulan', now()->month);
@@ -44,22 +47,40 @@ class WebLaporanController extends Controller
         $rows = [];
         $rows[] = ['REKAP ABSENSI & LEMBUR - ' . strtoupper(now()->month($bulan)->translatedFormat('F Y'))];
         $rows[] = [];
-        $rows[] = ['Nama', 'Unit Kerja', 'Tanggal', 'Jam Masuk', 'Jam Keluar', 'Durasi Kerja', 'Status', 'Terlambat (menit)', 'Jarak ke Pusat (m)', 'Lembur / On-Call'];
+        $rows[] = [
+            'Nama',
+            'Unit Kerja',
+            'Tanggal',
+            'Jam Masuk',
+            'Jam Keluar',
+            'Durasi Kerja',
+            'Status',
+            'Terlambat (menit)',
+            'Jarak ke Pusat (m)',
+            'Lembur (Menit)',
+            'On-Call (Menit)',
+        ];
 
         foreach ($logs as $log) {
             $nama = $log->user?->name ?? $log->roster?->user?->name ?? '-';
             $key  = ($log->user_id ?? $log->roster?->user_id) . '|' . optional($log->waktu_masuk)->toDateString();
             $items = $lemburs->get($key);
 
-            $lemburText = '-';
-            if ($items && $items->isNotEmpty()) {
-                $lemburText = $items->map(
-                    fn($l) =>
-                    $l->jenis_lembur . ' (' . number_format($l->total_jam_lembur ?? 0, 1) . ' jam, ' . $l->status_validasi . ')'
-                )->implode(' ; ');
+            // ✅ Pisahkan total menit: LEMBUR vs ON-CALL
+            $mLembur = 0;
+            $mOncall = 0;
+            if ($items) {
+                foreach ($items as $l) {
+                    $mnt = (float) ($l->total_jam_lembur ?? 0) * 60;
+                    $norm = str_contains(
+                        strtolower(str_replace(['-', ' ', '_'], '', $l->jenis_lembur ?? '')),
+                        'oncall'
+                    );
+                    $norm ? $mOncall += $mnt : $mLembur += $mnt;
+                }
             }
-
-            $menitLembur = $items ? (int) round($items->sum('total_jam_lembur') * 60) : 0;
+            $mLembur = (int) round($mLembur);
+            $mOncall = (int) round($mOncall);
 
             $rows[] = [
                 $nama,
@@ -71,7 +92,8 @@ class WebLaporanController extends Controller
                 $log->status_kehadiran,
                 $log->menit_terlambat ?? 0,
                 $log->jarak ?? '-',
-                $menitLembur > 0 ? $menitLembur . ' mnt' : '-', 
+                $mLembur,   // ✅ kolom lembur (menit)
+                $mOncall,   // ✅ kolom on-call (menit)
             ];
         }
 
@@ -86,6 +108,9 @@ class WebLaporanController extends Controller
         ]);
     }
 
+    /**
+     * Export PDF — buka di tab baru, render halaman print-friendly
+     */
     public function exportPdf(Request $request)
     {
         $bulan = (int) $request->input('bulan', now()->month);
@@ -102,8 +127,6 @@ class WebLaporanController extends Controller
         $pengaturan = PengaturanAplikasi::first();
         $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
         $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
-
-        $scopeUnit = fn($q) => $q->when($unit, fn($qq) => $qq->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unit)));
 
         $logs = LogAbsensi::with(['user.unitKerja', 'roster.user.unitKerja'])
             ->whereMonth('waktu_masuk', $bulan)
@@ -147,6 +170,9 @@ class WebLaporanController extends Controller
         return [$logs, $lemburs];
     }
 
+    /**
+     * Hitung jarak (meter) antara titik kantor dan titik absen
+     */
     private function haversine($lat1, $lon1, $lat2, $lon2): float
     {
         $R = 6371000;

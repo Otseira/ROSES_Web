@@ -48,6 +48,17 @@
                 </div>
             </div>
         </div>
+        <div class="bg-white rounded-2xl border border-slate-100/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-5">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><i
+                        data-lucide="timer" class="w-5 h-5"></i></div>
+                <div>
+                    <p class="text-[0.65rem] font-black uppercase tracking-widest text-slate-400">Jam Lembur</p>
+                    <p class="text-xl font-extrabold text-blue-600">{{ number_format($stats['jam_lembur'], 1) }} <span
+                            class="text-xs font-bold text-slate-400">jam</span></p>
+                </div>
+            </div>
+        </div>
     </div>
 
     {{-- ===== TABEL REKAP ===== --}}
@@ -68,7 +79,6 @@
                     <option value="{{ $y }}" {{ $tahun==$y ? 'selected' : '' }}>{{ $y }}</option>
                     @endfor
                 </select>
-                {{-- ✅ Filter Unit --}}
                 <select name="unit"
                     class="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none max-w-[220px]">
                     <option value="">🏢 Semua Unit</option>
@@ -113,7 +123,8 @@
                         <th class="px-5 py-4">Telat</th>
                         <th class="px-5 py-4">Jarak</th>
                         <th class="px-5 py-4">Foto</th>
-                        <th class="px-5 py-4">Lembur / On-Call</th>
+                        <th class="px-5 py-4">Lembur (Menit)</th>
+                        <th class="px-5 py-4">On-Call (Menit)</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
@@ -125,6 +136,18 @@
                     $key = ($log->user_id ?? $log->roster?->user_id) . '|' .
                     optional($log->waktu_masuk)->toDateString();
                     $items = $lemburs->get($key);
+                    $mLembur = 0;
+                    $mOncall = 0;
+                    if ($items) {
+                    foreach ($items as $l) {
+                    $mnt = (float) ($l->total_jam_lembur ?? 0) * 60;
+                    $norm = str_contains(strtolower(str_replace(['-', ' ', '_'], '', $l->jenis_lembur ?? '')),
+                    'oncall');
+                    $norm ? $mOncall += $mnt : $mLembur += $mnt;
+                    }
+                    }
+                    $mLembur = (int) round($mLembur);
+                    $mOncall = (int) round($mOncall);
                     @endphp
                     <tr class="hover:bg-slate-50/60 transition-all">
                         <td class="px-5 py-4 text-sm font-bold text-slate-800 whitespace-nowrap">{{ $nama }}</td>
@@ -138,7 +161,6 @@
                         <td class="px-5 py-4 text-sm font-semibold text-slate-600 whitespace-nowrap">{{
                             $log->durasi_kerja ?? '-' }}</td>
 
-                        {{-- ✅ Badge status --}}
                         <td class="px-5 py-4 whitespace-nowrap">
                             <span
                                 class="px-2.5 py-1 rounded-full text-[10px] font-bold
@@ -154,7 +176,6 @@
                         <td class="px-5 py-4 text-sm font-semibold text-slate-600 whitespace-nowrap">{{ $log->jarak !==
                             null ? $log->jarak . ' m' : '-' }}</td>
 
-                        {{-- Foto masuk & keluar digabung 1 kolom --}}
                         <td class="px-5 py-4">
                             <div class="flex gap-1.5">
                                 @if($log->foto_masuk)
@@ -174,24 +195,18 @@
                                     class="text-slate-400 text-sm">—</span> @endif
                             </div>
                         </td>
-
-                        <td class="px-5 py-4">
-                            @if($items && $items->isNotEmpty())
-                            @foreach($items as $l)
-                            <span
-                                class="inline-block px-2.5 py-1 mb-1 mr-1 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-[10px] font-bold">
-                                ⏱ {{ $l->jenis_lembur }} • {{ number_format($l->total_jam_lembur ?? 0, 1) }} jam • {{
-                                $l->status_validasi }}
-                            </span>
-                            @endforeach
-                            @else
-                            <span class="text-slate-400 text-sm">—</span>
-                            @endif
+                        <td
+                            class="px-5 py-4 text-sm font-bold {{ $mLembur > 0 ? 'text-blue-700' : 'text-slate-400' }} whitespace-nowrap">
+                            {{ $mLembur > 0 ? $mLembur . ' mnt' : '—' }}
+                        </td>
+                        <td
+                            class="px-5 py-4 text-sm font-bold {{ $mOncall > 0 ? 'text-indigo-700' : 'text-slate-400' }} whitespace-nowrap">
+                            {{ $mOncall > 0 ? $mOncall . ' mnt' : '—' }}
                         </td>
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="11" class="px-5 py-12 text-center text-sm text-slate-400 font-semibold">Belum ada
+                        <td colspan="12" class="px-5 py-12 text-center text-sm text-slate-400 font-semibold">Belum ada
                             data absensi pada periode ini.</td>
                     </tr>
                     @endforelse
