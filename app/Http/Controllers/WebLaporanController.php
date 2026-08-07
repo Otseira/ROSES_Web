@@ -19,7 +19,7 @@ class WebLaporanController extends Controller
 
         [$logs, $lemburs] = $this->buildData($bulan, $tahun);
 
-        return view('laporan.index', compact('bulan', 'tahun', 'logs', 'lemburs'));
+        return view('laporan.laporan', compact('bulan', 'tahun', 'logs', 'lemburs'));
     }
 
     /**
