@@ -288,15 +288,6 @@
         <button class="btn" onclick="window.print()">🖨️ Cetak / Simpan PDF</button>
     </div>
 
-    @php
-    $total = $logs->count();
-    $tepat = $logs->where('status_kehadiran', 'Tepat Waktu')->count();
-    $telat = $logs->where('status_kehadiran', 'Terlambat')->count();
-    $luar = $logs->where('status_kehadiran', 'Luar Jadwal')->count();
-    $menitLate = (int) $logs->sum('menit_terlambat');
-    $jamLembur = round($lemburs->flatten()->sum('total_jam_lembur'), 1);
-    @endphp
-
     <div class="page">
 
         {{-- Kop --}}
@@ -308,30 +299,6 @@
             <div class="right">
                 <span class="period">{{ now()->month($bulan)->translatedFormat('F Y') }}</span>
                 <div class="gen">Dicetak: {{ now()->format('d M Y, H:i') }} WIB</div>
-            </div>
-        </div>
-
-        {{-- Statistik --}}
-        <div class="stats">
-            <div class="stat dark">
-                <div class="num">{{ $total }}</div>
-                <div class="lbl">Total Absensi</div>
-            </div>
-            <div class="stat green">
-                <div class="num">{{ $tepat }}</div>
-                <div class="lbl">Tepat Waktu</div>
-            </div>
-            <div class="stat red">
-                <div class="num">{{ $telat }}</div>
-                <div class="lbl">Terlambat ({{ $menitLate }} mnt)</div>
-            </div>
-            <div class="stat amber">
-                <div class="num">{{ $luar }}</div>
-                <div class="lbl">Luar Jadwal</div>
-            </div>
-            <div class="stat blue">
-                <div class="num">{{ number_format($jamLembur, 1) }}</div>
-                <div class="lbl">Jam Lembur</div>
             </div>
         </div>
 
