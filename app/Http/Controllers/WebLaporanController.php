@@ -30,7 +30,7 @@ class WebLaporanController extends Controller
 
         $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
 
-        return view('laporan.index', compact('bulan', 'tahun', 'unit', 'logs', 'lemburs', 'stats', 'units'));
+        return view('laporan.laporan', compact('bulan', 'tahun', 'unit', 'logs', 'lemburs', 'stats', 'units'));
     }
 
     public function exportExcel(Request $request)
