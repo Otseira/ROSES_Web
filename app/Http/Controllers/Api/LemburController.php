@@ -210,10 +210,6 @@ class LemburController extends Controller
         return $earthRadius * 2 * atan2(sqrt($a), sqrt(1 - $a));
     }
 
-    /**
-     * Daftar lembur yang menunggu validasi + riwayat
-     * Akses: hrd, superadmin, direktur, kepala_unit, penanggung_jawab
-     */
     public function listValidasi(Request $request)
     {
         $user = $request->user();
@@ -226,42 +222,28 @@ class LemburController extends Controller
             ], 403);
         }
 
-        // Kepala Unit & Penanggung Jawab hanya melihat lembur unit yang dikelola
-        $scopeUnit = function ($q) use ($user) {
-            if (in_array($user->role, ['kepala_unit', 'penanggung_jawab'])) {
-                $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
-                if ($unitIds->isEmpty()) {
-                    $unitIds = collect([$user->unit_kerja_id]);
-                }
-                $q->whereHas('user', fn($qq) => $qq->whereIn('unit_kerja_id', $unitIds));
+        $query = LogLembur::with('user.unitKerja')->latest('waktu_mulai_lembur');
+
+        if ($request->filled('status')) {
+            $query->where('status_validasi', $request->status);
+        }
+
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab'])) {
+            $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
+            if ($unitIds->isEmpty()) {
+                $unitIds = collect([$user->unit_kerja_id]);
             }
-        };
+            $query->whereHas('user', fn($q) => $q->whereIn('unit_kerja_id', $unitIds));
+        }
 
-        $menunggu = LogLembur::with('user.unitKerja')
-            ->where('status_validasi', 'Menunggu')
-            ->tap($scopeUnit)
-            ->latest('waktu_mulai_lembur')
-            ->get();
-
-        $riwayat = LogLembur::with('user.unitKerja')
-            ->where('status_validasi', '!=', 'Menunggu')
-            ->tap($scopeUnit)
-            ->latest('waktu_mulai_lembur')
-            ->limit(50)
-            ->get();
+        $lembur = $query->get();
 
         return response()->json([
             'success' => true,
-            'data' => [
-                'menunggu' => $menunggu,
-                'riwayat'  => $riwayat,
-            ],
+            'data' => $lembur,
         ], 200);
     }
 
-    /**
-     * Proses validasi (approve / reject) lembur
-     */
     public function prosesValidasi(Request $request, $id)
     {
         $user = $request->user();
