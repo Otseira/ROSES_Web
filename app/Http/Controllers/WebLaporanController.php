@@ -59,6 +59,8 @@ class WebLaporanController extends Controller
                 )->implode(' ; ');
             }
 
+            $menitLembur = $items ? (int) round($items->sum('total_jam_lembur') * 60) : 0;
+
             $rows[] = [
                 $nama,
                 $log->user?->unitKerja?->nama_unit ?? $log->roster?->user?->unitKerja?->nama_unit ?? '-',
@@ -69,7 +71,7 @@ class WebLaporanController extends Controller
                 $log->status_kehadiran,
                 $log->menit_terlambat ?? 0,
                 $log->jarak ?? '-',
-                $lemburText,
+                $menitLembur > 0 ? $menitLembur . ' mnt' : '-', 
             ];
         }
 

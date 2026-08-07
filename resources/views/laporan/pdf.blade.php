@@ -294,7 +294,7 @@
         <div class="head">
             <div>
                 <h1>RSKB ROPANASURI — LAPORAN REKAP ABSENSI & LEMBUR</h1>
-                <p>Sistem Informasi Absensi (SIRO) • absensi.ropanasuri.com</p>
+                <p>Sistem Absensi Ropanasuri (ROSES)</p>
             </div>
             <div class="right">
                 <span class="period">{{ now()->month($bulan)->translatedFormat('F Y') }}</span>
@@ -315,7 +315,8 @@
                     <th>Status</th>
                     <th>Telat</th>
                     <th>Jarak ke Pusat</th>
-                    <th>Lembur / On-Call</th>
+                    <th>Lembur (Menit)</th>
+                    <th>On-Call (Menit)</th>
                 </tr>
             </thead>
             <tbody>
@@ -325,14 +326,27 @@
                 $unitNama = $log->user?->unitKerja?->nama_unit ?? $log->roster?->user?->unitKerja?->nama_unit ?? '-';
                 $key = ($log->user_id ?? $log->roster?->user_id) . '|' . optional($log->waktu_masuk)->toDateString();
                 $items = $lemburs->get($key);
+
+                $mLembur = 0; $mOncall = 0;
+                if ($items) {
+                foreach ($items as $l) {
+                $mnt = (float) ($l->total_jam_lembur ?? 0) * 60;
+                $norm = str_contains(strtolower(str_replace(['-', ' '], '', $l->jenis_lembur ?? '')), 'oncall');
+                $norm ? $mOncall += $mnt : $mLembur += $mnt;
+                }
+                }
+                $mLembur = (int) round($mLembur);
+                $mOncall = (int) round($mOncall);
                 @endphp
                 <tr>
                     <td><b>{{ $nama }}</b></td>
                     <td>{{ $unitNama }}</td>
                     <td>{{ optional($log->waktu_masuk)->format('d M Y') ?? '-' }}</td>
                     <td>{{ optional($log->waktu_masuk)->format('H:i') ?? '-' }}</td>
-                    <td>{{ optional($log->waktu_pulang)->format('H:i') ?? '<span class=muted>-</span>' }}</td>
-                    <td>{{ $log->durasi_kerja ?? '<span class=muted>-</span>' }}</td>
+
+                    <td>{{ optional($log->waktu_pulang)->format('H:i') ?? '-' }}</td>
+                    <td>{{ $log->durasi_kerja ?? '-' }}</td>
+
                     <td>
                         <span
                             class="badge {{ $log->status_kehadiran == 'Tepat Waktu' ? 'ok' : ($log->status_kehadiran == 'Terlambat' ? 'late' : 'out') }}">
@@ -341,14 +355,8 @@
                     </td>
                     <td>{{ ($log->menit_terlambat ?? 0) > 0 ? $log->menit_terlambat . ' mnt' : '—' }}</td>
                     <td>{{ $log->jarak !== null ? $log->jarak . ' m' : '-' }}</td>
-                    <td>
-                        @if($items && $items->isNotEmpty())
-                        @foreach($items as $l)
-                        <span class="chip">{{ $l->jenis_lembur }} • {{ number_format($l->total_jam_lembur ?? 0, 1) }}
-                            jam • {{ $l->status_validasi }}</span>
-                        @endforeach
-                        @else <span class="muted">—</span> @endif
-                    </td>
+                    <td><b>{{ $mLembur > 0 ? $mLembur . ' mnt' : '—' }}</b></td>
+                    <td><b>{{ $mOncall > 0 ? $mOncall . ' mnt' : '—' }}</b></td>
                 </tr>
                 @empty
                 <tr>
