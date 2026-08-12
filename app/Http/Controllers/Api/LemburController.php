@@ -13,10 +13,12 @@ use Illuminate\Http\Request;
 class LemburController extends Controller
 {
     /**
+     * ===================================================================
      * LEMBUR EKSTENSI SHIFT
-     * - Auto clock-out jika belum absen pulang
+     * - 1x tekan → mengakhiri jam dinas (auto clock-out)
      * - Durasi default otomatis (akhir shift → sekarang)
      * - Bisa diedit manual dalam range 1 – maxMenit
+     * ===================================================================
      */
     public function storeEkstensi(Request $request)
     {
@@ -32,7 +34,7 @@ class LemburController extends Controller
         $now   = Carbon::now();
         $today = $now->toDateString();
 
-        // Cegah duplikasi
+        // Cegah duplikasi ekstensi hari ini
         $cekEkstensi = LogLembur::where('user_id', $user->id)
             ->where('jenis_lembur', 'Ekstensi Shift')
             ->whereDate('waktu_mulai_lembur', $today)
@@ -47,21 +49,25 @@ class LemburController extends Controller
             ->where('tanggal_dinas', $today)
             ->first();
         if (!$roster) {
-            return response()->json(['success' => false, 'message' => 'Jadwal dinas tidak ditemukan.'], 422);
+            return response()->json(['success' => false, 'message' => 'Jadwal dinas tidak ditemukan. Gunakan On-Call untuk hari libur.'], 422);
         }
 
-        // Hitung jam pulang shift (handle shift malam)
+        // Hitung jam pulang shift (handle shift malam lewat tengah malam)
         $shift = $roster->shift;
         $jamPulangShift = Carbon::parse($today . ' ' . $shift->jam_pulang);
         if (Carbon::parse($shift->jam_pulang)->lessThan(Carbon::parse($shift->jam_masuk))) {
             $jamPulangShift->addDay();
         }
 
+        // Tidak boleh sebelum jam pulang shift
         if ($now->lessThan($jamPulangShift)) {
-            return response()->json(['success' => false, 'message' => 'Lembur ekstensi hanya bisa diajukan setelah jam pulang shift (' . $jamPulangShift->format('H:i') . ').'], 422);
+            return response()->json([
+                'success' => false,
+                'message' => 'Lembur ekstensi hanya bisa diajukan setelah jam pulang shift (' . $jamPulangShift->format('H:i') . ').',
+            ], 422);
         }
 
-        // ✅ RANGE TERKUNCI
+        // ✅ RANGE TERKUNCI: 1 s/d (sekarang − akhir shift)
         $maxMenit    = intdiv($now->getTimestamp() - $jamPulangShift->getTimestamp(), 60);
         $durasiMenit = $request->filled('durasi_menit') ? (int) $request->durasi_menit : $maxMenit;
 
@@ -69,7 +75,10 @@ class LemburController extends Controller
             return response()->json(['success' => false, 'message' => 'Durasi minimal 1 menit.'], 422);
         }
         if ($durasiMenit > $maxMenit) {
-            return response()->json(['success' => false, 'message' => "Durasi melebihi batas. Maksimal {$maxMenit} menit."], 422);
+            return response()->json([
+                'success' => false,
+                'message' => "Durasi melebihi batas. Maksimal {$maxMenit} menit (dari akhir shift {$shift->jam_pulang} s/d sekarang).",
+            ], 422);
         }
 
         // Hitung waktu
@@ -77,7 +86,7 @@ class LemburController extends Controller
         $waktuMulai   = $now->copy()->subMinutes($durasiMenit);
         $totalJam     = round($durasiMenit / 60, 2);
 
-        // ✅ AUTO CLOCK-OUT
+        // ✅ AUTO CLOCK-OUT: akhiri jam dinas jika belum absen pulang
         $logAbsen = LogAbsensi::where('roster_id', $roster->id)->first();
         $autoClockOut = false;
         if ($logAbsen && $logAbsen->waktu_pulang === null) {
@@ -87,7 +96,7 @@ class LemburController extends Controller
             $autoClockOut = true;
         }
 
-        // Verifikasi radius
+        // Geofencing
         $cekRadius = $this->verifikasiRadius($request);
         if ($cekRadius !== true) return $cekRadius;
 
@@ -124,34 +133,106 @@ class LemburController extends Controller
     }
 
     /**
-     * ON-CALL
-     * - Auto clock-out jika ada log absensi terbuka
-     * - Durasi WAJIB diisi manual (tidak ada shift acuan)
-     * - Langsung selesai (tidak perlu clock-out terpisah)
+     * ===================================================================
+     * ON-CALL MASUK
+     * - Mirip absen masuk: catat jam mulai + foto + GPS
+     * - TIDAK menghitung durasi
+     * - TIDAK mengakhiri jam dinas
+     * ===================================================================
      */
     public function clockInOnCall(Request $request)
     {
         $request->validate([
-            'keterangan'   => 'required|string|max:500',
-            'latitude'     => 'required|numeric',
-            'longitude'    => 'required|numeric',
-            'foto_masuk'   => 'required|image|mimes:jpeg,png,jpg|max:2048',
-            'durasi_menit' => 'required|integer|min:15|max:720',
+            'keterangan' => 'required|string|max:500',
+            'latitude'   => 'required|numeric',
+            'longitude'  => 'required|numeric',
+            'foto_masuk' => 'required|image|mimes:jpeg,png,jpg|max:2048',
         ]);
 
-        $user  = $request->user()->load('unitKerja');
-        $now   = Carbon::now();
-        $today = $now->toDateString();
+        $user = $request->user()->load('unitKerja');
+        $now  = Carbon::now();
 
-        $cekOnCall = LogLembur::where('user_id', $user->id)
+        // Cegah sesi ganda
+        $aktif = LogLembur::where('user_id', $user->id)
             ->where('jenis_lembur', 'On-Call')
             ->whereNull('waktu_selesai_lembur')
-            ->first();
-        if ($cekOnCall) {
-            return response()->json(['success' => false, 'message' => 'Masih ada sesi On-Call aktif.'], 422);
+            ->exists();
+        if ($aktif) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anda masih memiliki sesi On-Call aktif. Selesaikan dengan On-Call Keluar.',
+            ], 422);
         }
 
-        // ✅ AUTO CLOCK-OUT
+        // Geofencing DULUAN (sebelum menyimpan apa pun)
+        $cekRadius = $this->verifikasiRadius($request);
+        if ($cekRadius !== true) return $cekRadius;
+
+        // Simpan foto
+        $file = $request->file('foto_masuk');
+        $path = $file->storeAs('oncall_masuk', 'oncall_masuk_' . ($user->nik ?? $user->id) . '_' . time() . '.' . $file->extension(), 'public');
+
+        // ✅ Catat MULAI saja — seperti absen masuk (tanpa durasi, tanpa clock-out)
+        LogLembur::create([
+            'user_id'              => $user->id,
+            'jenis_lembur'         => 'On-Call',
+            'waktu_mulai_lembur'   => $now,
+            'waktu_selesai_lembur' => null,
+            'total_jam_lembur'     => null,
+            'status_validasi'      => 'Pending',
+            'keterangan'           => $request->keterangan,
+            'latitude_masuk'       => $request->latitude,
+            'longitude_masuk'      => $request->longitude,
+            'foto_masuk'           => $path,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'On-Call masuk berhasil dicatat pada ' . $now->format('H:i') . '. Jangan lupa lakukan On-Call Keluar saat tugas selesai.',
+            'data'    => [
+                'waktu_mulai' => $now->format('H:i'),
+            ],
+        ], 200);
+    }
+
+    /**
+     * ===================================================================
+     * ON-CALL KELUAR
+     * - Menyerupai lembur: mengakhiri sesi + hitung durasi otomatis
+     * - Durasi otomatis = waktu keluar − waktu masuk
+     * - Auto clock-out jam dinas jika belum absen pulang
+     * ===================================================================
+     */
+    public function clockOutOnCall(Request $request)
+    {
+        $request->validate([
+            'latitude'    => 'required|numeric',
+            'longitude'   => 'required|numeric',
+            'foto_keluar' => 'required|image|mimes:jpeg,png,jpg|max:2048',
+        ]);
+
+        $user = $request->user()->load('unitKerja');
+        $now  = Carbon::now();
+
+        // Ambil sesi On-Call aktif
+        $lembur = LogLembur::where('user_id', $user->id)
+            ->where('jenis_lembur', 'On-Call')
+            ->whereNull('waktu_selesai_lembur')
+            ->latest()
+            ->first();
+        if (!$lembur) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sesi On-Call aktif tidak ditemukan. Lakukan On-Call Masuk terlebih dahulu.',
+            ], 422);
+        }
+
+        // Geofencing DULUAN
+        $cekRadius = $this->verifikasiRadius($request);
+        if ($cekRadius !== true) return $cekRadius;
+
+        // ✅ AUTO CLOCK-OUT: akhiri jam dinas jika belum absen pulang
+        $today  = $now->toDateString();
         $roster = JadwalRoster::where('user_id', $user->id)->where('tanggal_dinas', $today)->first();
         $autoClockOut = false;
         if ($roster) {
@@ -164,50 +245,72 @@ class LemburController extends Controller
             }
         }
 
-        // Verifikasi radius
-        $cekRadius = $this->verifikasiRadius($request);
-        if ($cekRadius !== true) return $cekRadius;
+        // ✅ Durasi OTOMATIS: waktu masuk → waktu keluar
+        $waktuMulai  = Carbon::parse($lembur->waktu_mulai_lembur);
+        $durasiMenit = intdiv($now->getTimestamp() - $waktuMulai->getTimestamp(), 60);
+        $totalJam    = round($durasiMenit / 60, 2);
 
-        // Hitung waktu: Selesai = sekarang, Mulai = mundur
-        $durasiMenit = (int) $request->durasi_menit;
-        $waktuSelesai = $now;
-        $waktuMulai   = $now->copy()->subMinutes($durasiMenit);
-        $totalJam     = round($durasiMenit / 60, 2);
+        if ($durasiMenit < 1) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Durasi on-call belum tercatat (baru saja masuk).',
+            ], 422);
+        }
 
-        // Simpan foto
-        $file = $request->file('foto_masuk');
-        $path = $file->storeAs('oncall_masuk', 'oncall_masuk_' . ($user->nik ?? $user->id) . '_' . time() . '.' . $file->extension(), 'public');
+        // Simpan foto keluar
+        $file = $request->file('foto_keluar');
+        $path = $file->storeAs('oncall_keluar', 'oncall_keluar_' . ($user->nik ?? $user->id) . '_' . time() . '.' . $file->extension(), 'public');
 
-        // Simpan LANGSUNG SELESAI
-        LogLembur::create([
-            'user_id'              => $user->id,
-            'jenis_lembur'         => 'On-Call',
-            'waktu_mulai_lembur'   => $waktuMulai,
-            'waktu_selesai_lembur' => $waktuSelesai,
+        // Update log on-call
+        $lembur->update([
+            'waktu_selesai_lembur' => $now,
             'total_jam_lembur'     => $totalJam,
-            'status_validasi'      => 'Pending',
-            'keterangan'           => $request->keterangan,
-            'latitude_masuk'       => $request->latitude,
-            'longitude_masuk'      => $request->longitude,
-            'foto_masuk'           => $path,
+            'latitude_keluar'      => $request->latitude,
+            'longitude_keluar'     => $request->longitude,
+            'foto_keluar'          => $path,
         ]);
 
         return response()->json([
             'success' => true,
-            'message' => ($autoClockOut ? '✓ Absen pulang tercatat otomatis. ' : '') . '✓ On-Call berhasil diselesaikan.',
+            'message' => ($autoClockOut ? '✓ Absen pulang tercatat otomatis. ' : '') . '✓ On-Call selesai dicatat.',
             'data'    => [
                 'jenis_lembur'   => 'On-Call',
                 'waktu_mulai'    => $waktuMulai->format('H:i'),
-                'waktu_selesai'  => $waktuSelesai->format('H:i'),
+                'waktu_selesai'  => $now->format('H:i'),
                 'total_menit'    => $durasiMenit,
                 'total_jam'      => $totalJam,
                 'auto_clock_out' => $autoClockOut,
+                'keterangan'     => $lembur->keterangan,
             ],
         ], 200);
     }
 
     /**
-     * ✅ BARU: Info shift hari ini (untuk default durasi di mobile)
+     * ===================================================================
+     * ON-CALL AKTIF
+     * - Cek apakah ada sesi on-call yang belum diselesaikan
+     * - Untuk tombol dinamis di mobile (masuk / keluar)
+     * ===================================================================
+     */
+    public function onCallAktif(Request $request)
+    {
+        $lembur = LogLembur::where('user_id', $request->user()->id)
+            ->where('jenis_lembur', 'On-Call')
+            ->whereNull('waktu_selesai_lembur')
+            ->latest()
+            ->first();
+
+        return response()->json([
+            'success' => true,
+            'data'    => $lembur,
+        ], 200);
+    }
+
+    /**
+     * ===================================================================
+     * INFO SHIFT HARI INI
+     * - Untuk default durasi di form ekstensi shift
+     * ===================================================================
      */
     public function infoShiftHariIni(Request $request)
     {
@@ -241,7 +344,9 @@ class LemburController extends Controller
     }
 
     /**
-     * Validasi oleh atasan — handle 2 versi status: "Pending" atau "Menunggu"
+     * ===================================================================
+     * VALIDASI LEMBUR OLEH ATASAN
+     * ===================================================================
      */
     public function listValidasi(Request $request)
     {
@@ -252,11 +357,16 @@ class LemburController extends Controller
         }
 
         $query = LogLembur::with('user.unitKerja')->latest('waktu_mulai_lembur');
-        if ($request->filled('status')) $query->where('status_validasi', $request->status);
+        if ($request->filled('status')) {
+            $query->where('status_validasi', $request->status);
+        }
 
+        // Kepala Unit & PJ hanya bisa lihat lembur dari unit yang dikelola
         if (in_array($user->role, ['kepala_unit', 'penanggung_jawab'])) {
             $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
-            if ($unitIds->isEmpty()) $unitIds = collect([$user->unit_kerja_id]);
+            if ($unitIds->isEmpty()) {
+                $unitIds = collect([$user->unit_kerja_id]);
+            }
             $query->whereHas('user', fn($q) => $q->whereIn('unit_kerja_id', $unitIds));
         }
 
@@ -278,14 +388,18 @@ class LemburController extends Controller
 
         $lembur = LogLembur::with('user')->findOrFail($id);
 
+        // Kepala Unit & PJ hanya bisa validasi unit yang dikelola
         if (in_array($user->role, ['kepala_unit', 'penanggung_jawab'])) {
             $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
-            if ($unitIds->isEmpty()) $unitIds = collect([$user->unit_kerja_id]);
+            if ($unitIds->isEmpty()) {
+                $unitIds = collect([$user->unit_kerja_id]);
+            }
             if (!in_array($lembur->user->unit_kerja_id, $unitIds->all())) {
                 return response()->json(['success' => false, 'message' => 'Bukan unit yang Anda kelola.'], 403);
             }
         }
 
+        // Handle 2 versi status: "Pending" atau "Menunggu"
         if (!in_array($lembur->status_validasi, ['Menunggu', 'Pending'])) {
             return response()->json(['success' => false, 'message' => 'Sudah divalidasi sebelumnya.'], 422);
         }
@@ -299,7 +413,10 @@ class LemburController extends Controller
         return response()->json(['success' => true, 'message' => 'Lembur berhasil divalidasi.'], 200);
     }
 
-    // ===== Helpers =====
+    // ===================================================================
+    // HELPER METHODS
+    // ===================================================================
+
     private function verifikasiRadius(Request $request)
     {
         $pengaturan   = PengaturanAplikasi::first();

@@ -44,6 +44,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/lembur/oncall-keluar',   [LemburController::class, 'clockOutOnCall']);
     Route::get('/lembur/validasi',         [LemburController::class, 'listValidasi']);
     Route::post('/lembur/validasi/{id}',   [LemburController::class, 'prosesValidasi']);
+    Route::get('/lembur/oncall-aktif', [LemburController::class, 'onCallAktif']);
 
     // ===================================================================
     // OPERASIONAL & LAPORAN (Opsional untuk Mobile)
