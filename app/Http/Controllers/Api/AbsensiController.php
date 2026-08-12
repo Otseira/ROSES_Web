@@ -225,4 +225,35 @@ class AbsensiController extends Controller
 
         return $earthRadius * $c;
     }
+
+    public function infoShiftHariIni(Request $request)
+    {
+        $user  = $request->user();
+        $today = now()->toDateString();
+
+        $roster = JadwalRoster::with('shift')
+            ->where('user_id', $user->id)
+            ->where('tanggal_dinas', $today)
+            ->first();
+
+        if (!$roster) {
+            return response()->json(['success' => true, 'data' => null], 200);
+        }
+
+        $jamPulang = Carbon::parse($today . ' ' . $roster->shift->jam_pulang);
+        if (Carbon::parse($roster->shift->jam_pulang)->lessThan(Carbon::parse($roster->shift->jam_masuk))) {
+            $jamPulang->addDay();
+        }
+
+        $maxMenit = intdiv(now()->getTimestamp() - $jamPulang->getTimestamp(), 60);
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'jam_masuk'  => $roster->shift->jam_masuk,
+                'jam_pulang' => $roster->shift->jam_pulang,
+                'max_menit'  => max(0, $maxMenit),
+            ],
+        ], 200);
+    }
 }
