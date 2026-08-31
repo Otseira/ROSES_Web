@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\DB;
 class LaporanController extends Controller
 {
     /**
-     * Mengambil Rekapitulasi Laporan Bulanan Otomatis (Akses: HRD / SDM / Keuangan)
+     * Mengambil Rekapitulasi Laporan Bulanan Otomatis (Akses: HRD / SDM / Keuangan / Kepala Unit)
      */
     public function rekapBulanan(Request $request)
     {
@@ -27,6 +27,29 @@ class LaporanController extends Controller
 
         $bulan = $request->bulan;
         $tahun = $request->tahun;
+        $user = $request->user();
+
+        // === LOGIKA HAK AKSES MULTI-UNIT (SCOPING) ===
+        $allowedUnitIds = null;
+
+        if (!$user->hasGlobalAccess()) {
+            // Kepala Unit / Manajemen hanya boleh melihat unit yang dikelola
+            $allowedUnitIds = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
+            if ($user->unit_kerja_id && !in_array($user->unit_kerja_id, $allowedUnitIds)) {
+                $allowedUnitIds[] = $user->unit_kerja_id;
+            }
+
+            // Proteksi Keamanan: Jika frontend mengirim request unit_kerja_id spesifik, 
+            // pastikan unit tersebut ada di dalam daftar allowedUnitIds miliknya
+            if ($request->unit_kerja_id) {
+                if (!in_array($request->unit_kerja_id, $allowedUnitIds)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Akses ditolak. Anda tidak memiliki izin untuk melihat laporan unit kerja tersebut.',
+                    ], 403);
+                }
+            }
+        }
 
         // 2. Ambil Parameter Finansial & Aturan Tanggal
         $pengaturan = PengaturanPayroll::first();
@@ -41,9 +64,17 @@ class LaporanController extends Controller
 
         // 4. Query Data Pegawai dengan Eager Loading Aggregates (Mencegah N+1 Query)
         $users = User::with('unitKerja')
+
+            // FILTER 1: Batasi berdasarkan hak akses role (Kepala Unit vs HRD)
+            ->when($allowedUnitIds !== null, function ($query) use ($allowedUnitIds) {
+                $query->whereIn('unit_kerja_id', $allowedUnitIds);
+            })
+
+            // FILTER 2: Batasi berdasarkan request spesifik dari frontend (jika ada)
             ->when($request->unit_kerja_id, function ($query) use ($request) {
                 $query->where('unit_kerja_id', $request->unit_kerja_id);
             })
+
             ->withCount([
                 // Menghitung jumlah hari hadir langsung di level database query
                 'logAbsensis as total_hadir' => function ($query) use ($startDate, $endDate) {
@@ -62,14 +93,14 @@ class LaporanController extends Controller
             ->withSum([
                 'logLemburs as total_jam_lembur' => function ($query) use ($startDate, $endDate) {
                     $query->where('status_validasi', 'Disetujui')
-                          ->whereBetween('waktu_mulai_lembur', [$startDate, $endDate]);
+                        ->whereBetween('waktu_mulai_lembur', [$startDate, $endDate]);
                 }
             ], 'total_jam_lembur')
             ->get();
 
         // 5. Mapping Data Finansial (Hanya kalkulasi matematika murni tanpa hit query lagi)
         $dataRekap = $users->map(function ($user) use ($ratePotongan, $rateLembur) {
-            
+
             // Mengambil hasil aggregate database (jika null otomatis diubah ke 0)
             $totalHadir = $user->total_hadir;
             $totalMenitTerlambat = $user->total_menit_terlambat ?? 0;

@@ -17,17 +17,20 @@ class JadwalRoster extends Model
     ];
 
     // Relasi: Jadwal ini milik pegawai tertentu
-    public function user(): BelongsTo
-    {
-        return $this->belongsTo(User::class, 'user_id');
-    }
-
-    // Relasi: Jadwal ini mengacu pada shift kerja tertentu
     public function shift(): BelongsTo
     {
         return $this->belongsTo(MasterShift::class, 'shift_id');
     }
 
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function unitKerja(): BelongsTo
+    {
+        return $this->belongsTo(MasterUnitKerja::class, 'unit_kerja_id');
+    }
     // Relasi: Satu slot jadwal dinas harian menghasilkan maksimal satu rekaman log absensi
     public function logAbsensi(): HasOne
     {

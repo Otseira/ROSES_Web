@@ -17,28 +17,61 @@ class RosterController extends Controller
         $request->validate([
             'bulan' => 'required|integer|between:1,12',
             'tahun' => 'required|integer|min:2020',
+            'unit_kerja_id' => 'nullable|exists:master_unit_kerjas,id', // Tambahan untuk filter spesifik
         ]);
 
-        $kepalaUnit = $request->user();
-        $unitKerjaId = $kepalaUnit->unit_kerja_id;
-
-        if (!$unitKerjaId) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Akun Anda tidak terikat dengan unit kerja mana pun.',
-            ], 422);
-        }
-
+        $user = $request->user();
         $bulan = $request->bulan;
         $tahun = $request->tahun;
 
-        $staf = User::where('unit_kerja_id', $unitKerjaId)
-            ->where('id', '!=', $kepalaUnit->id)
-            ->with(['rosters' => function ($query) use ($bulan, $tahun) {
-                $query->whereMonth('tanggal_dinas', $bulan)
-                    ->whereYear('tanggal_dinas', $tahun)
-                    ->with('shift');
-            }])
+        // === LOGIKA HAK AKSES MULTI-UNIT ===
+        $allowedUnitIds = null;
+        if (!$user->hasGlobalAccess()) {
+            $allowedUnitIds = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
+            if ($user->unit_kerja_id && !in_array($user->unit_kerja_id, $allowedUnitIds)) {
+                $allowedUnitIds[] = $user->unit_kerja_id;
+            }
+
+            // Jika user tidak punya unit sama sekali
+            if (empty($allowedUnitIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Akun Anda tidak terikat dengan unit kerja mana pun.',
+                ], 422);
+            }
+        }
+
+        // Validasi keamanan: Jika frontend minta unit spesifik, pastikan unit itu ada di allowedUnitIds
+        if ($request->unit_kerja_id && $allowedUnitIds !== null) {
+            if (!in_array($request->unit_kerja_id, $allowedUnitIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anda tidak memiliki akses untuk melihat roster unit ini.',
+                ], 403);
+            }
+        }
+
+        // === QUERY DATA STAF ===
+        $stafQuery = User::query();
+
+        // Terapkan filter hak akses
+        if ($allowedUnitIds !== null) {
+            $stafQuery->whereIn('unit_kerja_id', $allowedUnitIds);
+        }
+
+        // Terapkan filter spesifik dari request (jika ada)
+        if ($request->unit_kerja_id) {
+            $stafQuery->where('unit_kerja_id', $request->unit_kerja_id);
+        }
+
+        // Exclude kepala unit itu sendiri dari daftar staf
+        $stafQuery->where('id', '!=', $user->id);
+
+        $staf = $stafQuery->with(['rosters' => function ($query) use ($bulan, $tahun) {
+            $query->whereMonth('tanggal_dinas', $bulan)
+                ->whereYear('tanggal_dinas', $tahun)
+                ->with('shift');
+        }])
             ->get();
 
         $shifts = MasterShift::all();
@@ -55,6 +88,7 @@ class RosterController extends Controller
                         'user_id' => $employee->id,
                         'nik' => $employee->nik,
                         'nama' => $employee->name,
+                        'unit_kerja_id' => $employee->unit_kerja_id, // Berguna untuk frontend mengelompokkan
                         'jadwal' => $employee->rosters->map(function ($r) {
                             return [
                                 'roster_id' => $r->id,
@@ -79,22 +113,34 @@ class RosterController extends Controller
             'roster_data.*.tanggal' => 'required|date_format:Y-m-d',
         ]);
 
-        $kepalaUnit = $request->user();
-        $unitKerjaId = $kepalaUnit->unit_kerja_id;
+        $user = $request->user();
+
+        // === LOGIKA HAK AKSES MULTI-UNIT ===
+        $allowedUnitIds = null;
+        if (!$user->hasGlobalAccess()) {
+            $allowedUnitIds = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
+            if ($user->unit_kerja_id && !in_array($user->unit_kerja_id, $allowedUnitIds)) {
+                $allowedUnitIds[] = $user->unit_kerja_id;
+            }
+        }
 
         DB::beginTransaction();
 
         try {
             foreach ($request->roster_data as $data) {
+
+                // === VALIDASI KEAMANAN (Apakah staf ini bawahan yang sah?) ===
                 $isBawahan = User::where('id', $data['user_id'])
-                    ->where('unit_kerja_id', $unitKerjaId)
+                    ->when($allowedUnitIds !== null, function ($query) use ($allowedUnitIds) {
+                        $query->whereIn('unit_kerja_id', $allowedUnitIds);
+                    })
                     ->exists();
 
                 if (!$isBawahan) {
                     DB::rollBack();
                     return response()->json([
                         'success' => false,
-                        'message' => 'Pelanggaran akses. Anda mencoba mengisi jadwal untuk pegawai di luar unit kerja Anda.',
+                        'message' => 'Pelanggaran akses. Anda mencoba mengisi jadwal untuk pegawai di luar unit kerja yang Anda kelola.',
                     ], 403);
                 }
 
@@ -126,6 +172,7 @@ class RosterController extends Controller
 
     public function jadwalDinas(Request $request)
     {
+        // Method ini tidak perlu diubah karena ini khusus untuk user melihat jadwalnya sendiri
         $user  = $request->user();
         $bulan = (int) $request->query('bulan', now()->month);
         $tahun = (int) $request->query('tahun', now()->year);
@@ -165,7 +212,7 @@ class RosterController extends Controller
         $hari = [];
         for ($d = 1; $d <= $jumlahHari; $d++) {
             $r   = $rosters[$d] ?? null;
-            $log = $r?->logAbsensi;                       
+            $log = $r?->logAbsensi;
             $shiftNama = $r?->shift?->nama_shift;
             $low = strtolower(trim((string) $shiftNama));
             $libur = ($r === null) || str_contains($low, 'libur') || $low === 'off';

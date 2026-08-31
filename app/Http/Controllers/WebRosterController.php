@@ -10,65 +10,94 @@ use Carbon\Carbon;
 
 class WebRosterController extends Controller
 {
-    public function index(Request $request)
+    /**
+     * Helper: daftar ID unit yang boleh dikelola oleh user login.
+     * null = akses global (lihat semua unit).
+     */
+    private function allowedUnitIds(User $user): ?array
     {
-        $bulan = $request->input('bulan', date('m'));
-        $tahun = $request->input('tahun', date('Y'));
-        
-        $jumlahHari = \Carbon\Carbon::createFromDate($tahun, $bulan)->daysInMonth;
-        $userLogin = $request->user();
-        
-        // Mulai query pencarian staf
-        $queryStaf = User::query();
-
-        // KUNCI UTAMA: Sembunyikan semua akun ber-role 'superadmin' dari matriks roster harian
-        $queryStaf->where('role', '!=', 'superadmin');
-
-        // JIKA BUKAN SUPERADMIN: Filter ketat staf berdasarkan unit kerja masing-masing
-        if ($userLogin->role !== 'superadmin') {
-            $queryStaf->where('unit_kerja_id', $userLogin->unit_kerja_id);
+        if ($user->hasGlobalAccess()) {
+            return null;
         }
 
-        // Ambil data staf beserta relasi jadwal rosternya
-        $staf = $queryStaf->with(['rosters' => function ($q) use ($tahun, $bulan) {
+        $ids = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
+
+        if ($user->unit_kerja_id && !in_array($user->unit_kerja_id, $ids)) {
+            $ids[] = $user->unit_kerja_id;
+        }
+
+        return $ids;
+    }
+
+    public function index(Request $request)
+    {
+        $bulan = (int) $request->input('bulan', date('m'));
+        $tahun = (int) $request->input('tahun', date('Y'));
+
+        $jumlahHari = Carbon::createFromDate($tahun, $bulan, 1)->daysInMonth;
+        $userLogin  = $request->user();
+
+        // Sembunyikan akun superadmin dari matriks roster
+        $queryStaf = User::query()->where('role', '!=', 'superadmin');
+
+        // FILTER MULTI-UNIT: Kepala unit melihat unit utama + semua unit yang dikelola
+        $allowed = $this->allowedUnitIds($userLogin);
+        if ($allowed !== null) {
+            if (empty($allowed)) {
+                $queryStaf->whereRaw('1 = 0'); // tidak punya unit sama sekali
+            } else {
+                $queryStaf->whereIn('unit_kerja_id', $allowed);
+            }
+        }
+
+        $staf = $queryStaf
+            ->with(['rosters' => function ($q) use ($tahun, $bulan) {
                 $q->whereYear('tanggal_dinas', $tahun)
-                  ->whereMonth('tanggal_dinas', $bulan);
+                    ->whereMonth('tanggal_dinas', $bulan);
             }])
-            ->orderBy('name') 
+            ->orderBy('name')
             ->get();
-        
-        $shifts = \App\Models\MasterShift::all();
+
+        $shifts = MasterShift::orderBy('jam_masuk')->get();
 
         return view('roster', compact('staf', 'shifts', 'bulan', 'tahun', 'jumlahHari'));
     }
+
     public function bulkStore(Request $request)
     {
         try {
-            // Mengambil array data input: roster[user_id][tanggal]
             $rosterData = $request->input('roster');
 
             if (!$rosterData) {
                 return response()->json([
-                    'success' => false, 
+                    'success' => false,
                     'message' => 'Tidak ada data jadwal yang dikirim.'
                 ]);
             }
 
+            $userLogin = $request->user();
+            $allowed   = $this->allowedUnitIds($userLogin);
+
+            // VALIDASI KEAMANAN: hanya staf di unit yang diizinkan yang boleh disimpan
+            $validUserIds = User::whereIn('id', array_keys($rosterData))
+                ->when($allowed !== null, function ($q) use ($allowed) {
+                    $q->whereIn('unit_kerja_id', $allowed);
+                })
+                ->pluck('id')
+                ->toArray();
+
             foreach ($rosterData as $userId => $dates) {
+                if (!in_array($userId, $validUserIds)) {
+                    continue; // abaikan / bisa juga dijadikan error 403
+                }
+
                 foreach ($dates as $tanggal => $shiftId) {
                     if ($shiftId) {
-                        // Jika ada shift yang dipilih (bukan Libur), update atau buat baru
                         JadwalRoster::updateOrCreate(
-                            [
-                                'user_id' => $userId,
-                                'tanggal_dinas' => $tanggal,
-                            ],
-                            [
-                                'shift_id' => $shiftId,
-                            ]
+                            ['user_id' => $userId, 'tanggal_dinas' => $tanggal],
+                            ['shift_id' => $shiftId]
                         );
                     } else {
-                        // Jika admin memilih "Libur" (value kosong), hapus jadwal di tanggal tersebut jika ada
                         JadwalRoster::where('user_id', $userId)
                             ->where('tanggal_dinas', $tanggal)
                             ->delete();
@@ -77,15 +106,64 @@ class WebRosterController extends Controller
             }
 
             return response()->json([
-                'success' => true, 
+                'success' => true,
                 'message' => 'Jadwal Roster berhasil disimpan dan dipublikasikan.'
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
-                'success' => false, 
+                'success' => false,
                 'message' => 'Terjadi kesalahan sistem: ' . $e->getMessage()
             ]);
         }
+    }
+
+    /**
+     * BARU: Menyalin seluruh jadwal bulan sebelumnya ke bulan aktif (1 klik).
+     */
+    public function copyPrevious(Request $request)
+    {
+        $request->validate([
+            'bulan' => 'required|integer|between:1,12',
+            'tahun' => 'required|integer|min:2020',
+        ]);
+
+        $bulan = (int) $request->bulan;
+        $tahun = (int) $request->tahun;
+
+        $userLogin = $request->user();
+        $allowed   = $this->allowedUnitIds($userLogin);
+
+        $prev       = Carbon::createFromDate($tahun, $bulan, 1)->subMonthNoOverflow();
+        $targetDays = Carbon::createFromDate($tahun, $bulan, 1)->daysInMonth;
+
+        $prevRosters = JadwalRoster::with('user')
+            ->whereYear('tanggal_dinas', $prev->year)
+            ->whereMonth('tanggal_dinas', $prev->month)
+            ->whereHas('user', function ($q) use ($allowed) {
+                $q->where('role', '!=', 'superadmin');
+                if ($allowed !== null) {
+                    $q->whereIn('unit_kerja_id', $allowed);
+                }
+            })
+            ->get();
+
+        $count = 0;
+        foreach ($prevRosters as $r) {
+            $day = (int) Carbon::parse($r->tanggal_dinas)->day;
+            if ($day > $targetDays) continue; // contoh: tgl 31 tidak ada di bulan 30 hari
+
+            $tanggalBaru = sprintf('%04d-%02d-%02d', $tahun, $bulan, $day);
+
+            JadwalRoster::updateOrCreate(
+                ['user_id' => $r->user_id, 'tanggal_dinas' => $tanggalBaru],
+                ['shift_id' => $r->shift_id]
+            );
+            $count++;
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => "Berhasil menyalin {$count} jadwal dari periode sebelumnya."
+        ]);
     }
 }

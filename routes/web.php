@@ -44,6 +44,7 @@ Route::middleware('auth')->group(function () {
     // 3. Operasional (Roster & Monitoring)
     Route::get('/roster', [WebRosterController::class, 'index'])->name('roster.index');
     Route::post('/roster/bulk-store', [WebRosterController::class, 'bulkStore'])->name('roster.bulk-store');
+    Route::post('/roster/copy-previous', [WebRosterController::class, 'copyPrevious'])->name('roster.copy-previous'); // <-- BARIS BARU
     Route::get('/monitoring', [WebMonitoringController::class, 'index'])->name('monitoring.index');
 
     // 4. Master Data
