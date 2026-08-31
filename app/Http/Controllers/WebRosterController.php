@@ -37,30 +37,33 @@ class WebRosterController extends Controller
         $jumlahHari = Carbon::createFromDate($tahun, $bulan, 1)->daysInMonth;
         $userLogin  = $request->user();
 
-        // Sembunyikan akun superadmin dari matriks roster
         $queryStaf = User::query()->where('role', '!=', 'superadmin');
 
-        // FILTER MULTI-UNIT: Kepala unit melihat unit utama + semua unit yang dikelola
         $allowed = $this->allowedUnitIds($userLogin);
         if ($allowed !== null) {
             if (empty($allowed)) {
-                $queryStaf->whereRaw('1 = 0'); // tidak punya unit sama sekali
+                $queryStaf->whereRaw('1 = 0');
             } else {
                 $queryStaf->whereIn('unit_kerja_id', $allowed);
             }
         }
 
         $staf = $queryStaf
-            ->with(['rosters' => function ($q) use ($tahun, $bulan) {
+            ->with(['unitKerja', 'rosters' => function ($q) use ($tahun, $bulan) {
                 $q->whereYear('tanggal_dinas', $tahun)
                     ->whereMonth('tanggal_dinas', $bulan);
             }])
             ->orderBy('name')
             ->get();
 
+        // KELOMPOKKAN STAF BERDASARKAN UNIT KERJA
+        $stafGrouped = $staf->groupBy(function ($u) {
+            return $u->unitKerja ? $u->unitKerja->nama_unit : 'Tanpa Unit';
+        })->sortKeys();
+
         $shifts = MasterShift::orderBy('jam_masuk')->get();
 
-        return view('roster', compact('staf', 'shifts', 'bulan', 'tahun', 'jumlahHari'));
+        return view('roster', compact('stafGrouped', 'shifts', 'bulan', 'tahun', 'jumlahHari'));
     }
 
     public function bulkStore(Request $request)

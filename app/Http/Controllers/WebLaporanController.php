@@ -196,14 +196,14 @@ class WebLaporanController extends Controller
         $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
         $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
 
-        $logs = LogAbsensi::with(['user.unitKerja', 'roster.user.unitKerja'])
+        $logs = LogAbsensi::with(['roster.user.unitKerja'])
             ->whereMonth('waktu_masuk', $bulan)
             ->whereYear('waktu_masuk', $tahun)
-            // Filter 1: Berdasarkan unit spesifik dari request
-            ->when($unit, fn($q) => $q->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unit)))
-            // Filter 2: Batasi berdasarkan hak akses user (Kepala Unit hanya lihat unitnya)
+            // Filter 1: unit spesifik dari dropdown (LEWAT roster -> user)
+            ->when($unit, fn($q) => $q->whereHas('roster.user', fn($u) => $u->where('unit_kerja_id', $unit)))
+            // Filter 2: hak akses user login (LEWAT roster -> user)
             ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {
-                $q->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+                $q->whereHas('roster.user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
             })
             ->orderBy('waktu_masuk')
             ->get()
@@ -232,12 +232,11 @@ class WebLaporanController extends Controller
                 return $log;
             });
 
+        // LogLembur AMAN pakai whereHas('user') karena tabel log_lemburs PUNYA kolom user_id
         $lemburs = LogLembur::with('user')
             ->whereMonth('waktu_mulai_lembur', $bulan)
             ->whereYear('waktu_mulai_lembur', $tahun)
-            // Filter 1: Berdasarkan unit spesifik dari request
             ->when($unit, fn($q) => $q->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unit)))
-            // Filter 2: Batasi berdasarkan hak akses user
             ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {
                 $q->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
             })
