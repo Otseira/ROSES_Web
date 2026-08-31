@@ -12,6 +12,11 @@ use Illuminate\Support\Facades\Storage;
 
 class AbsensiController extends Controller
 {
+    /**
+     * ABSEN MASUK
+     * Aman untuk shift harian maupun shift malam (lewat tengah malam).
+     */
+    const MASUK_CEPAT_MAKS_MENIT = 120;
     public function clockIn(Request $request)
     {
         $request->validate([
@@ -36,6 +41,15 @@ class AbsensiController extends Controller
             ->where('tanggal_dinas', $today)
             ->first();
 
+        // FALLBACK SHIFT MALAM: cek shift kemarin yang lewat tengah malam
+        if (!$roster) {
+            $rosterKemarin = $this->cariRosterShiftMalamAktif($user->id, $now);
+            if ($rosterKemarin) {
+                $roster = $rosterKemarin;
+                $today  = Carbon::parse($roster->tanggal_dinas)->toDateString();
+            }
+        }
+
         if (!$roster) {
             return response()->json(['success' => false, 'message' => 'Absen gagal. Anda tidak memiliki jadwal dinas yang terdaftar untuk hari ini.'], 422);
         }
@@ -45,7 +59,7 @@ class AbsensiController extends Controller
             return response()->json(['success' => false, 'message' => 'Anda sudah melakukan absen masuk untuk shift ini.'], 422);
         }
 
-        // ===== GEOFENCING (tetap) =====
+        // ===== GEOFENCING =====
         $pengaturan  = PengaturanAplikasi::first();
         $hospitalLat = $pengaturan ? (float) $pengaturan->latitude : -0.9471;
         $hospitalLng = $pengaturan ? (float) $pengaturan->longitude : 100.3511;
@@ -63,27 +77,26 @@ class AbsensiController extends Controller
         $jamPulangShift = Carbon::parse($today . ' ' . $shift->jam_pulang);
         if ($jamPulangShift->lessThanOrEqualTo($jamMasukShift)) $jamPulangShift->addDay();
 
+        // ✅ BATAS MASUK CEPAT: maksimal 2 jam sebelum jam shift (dulu 1 jam)
         $inWindow = $now->betweenIncluded(
-            $jamMasukShift->copy()->subMinutes(60),
+            $jamMasukShift->copy()->subMinutes(self::MASUK_CEPAT_MAKS_MENIT),
             $jamPulangShift->copy()->addMinutes(120)
         );
 
         // ===== PENENTUAN JENIS & TERLAMBAT =====
         if ($mode === 'normal' && !$inWindow) {
-            // Di luar jam roster pakai mode normal → arahkan ke menu khusus
             return response()->json([
                 'success' => false,
                 'code'    => 'OUTSIDE_WINDOW',
-                'message' => 'Anda berada di luar jam jadwal dinas. Jika terjadi perubahan/pergeseran jam dinas, silakan gunakan menu ABSENSI LUAR JADWAL.',
+                'message' => 'Absen masuk hanya dapat dilakukan maksimal 2 jam sebelum jam shift dimulai. Jika terjadi perubahan/pergeseran jam dinas, silakan gunakan menu ABSENSI LUAR JADWAL.',
             ], 422);
         }
 
         if ($mode === 'luar_jadwal' && !$inWindow) {
-            // ✅ KONDISI INTI: jam dinas bergeser → SAH, TIDAK terlambat
+            // Di luar jendela (terlalu cepat > 2 jam) tapi mode luar_jadwal → SAH, tidak telat
             $jenis          = 'luar_jadwal';
             $menitTerlambat = 0;
         } else {
-            // Normal, ATAU luar_jadwal tapi masih dalam jendela (anti-curang)
             $jenis          = 'normal';
             $toleransi      = (int) $shift->toleransi_terlambat_menit;
             $menitSelisih   = intdiv(max(0, $now->getTimestamp() - $jamMasukShift->getTimestamp()), 60);
@@ -126,6 +139,11 @@ class AbsensiController extends Controller
         ], 200);
     }
 
+    /**
+     * ABSEN PULANG
+     * FIX UTAMA: mendukung shift malam yang pulangnya lewat tengah malam / besok pagi.
+     * Tidak lagi menebak tanggal roster, melainkan mencari log absensi yang SEDANG AKTIF.
+     */
     public function clockOut(Request $request)
     {
         $request->validate([
@@ -137,28 +155,26 @@ class AbsensiController extends Controller
 
         $mode = $request->input('mode', 'normal');
         $user = $request->user();
-        $today = Carbon::today()->toDateString();
-        $now   = Carbon::now();
+        $now  = Carbon::now();
 
-        $roster = JadwalRoster::with('shift')
-            ->where('user_id', $user->id)
-            ->where('tanggal_dinas', $today)
+        // ===== CARI LOG ABSENSI YANG SEDANG AKTIF =====
+        // Aktif = sudah absen masuk, belum absen pulang.
+        // Cara ini 100% akurat untuk shift apa pun (pagi / siang / malam / 24 jam).
+        $activeLog = LogAbsensi::with('roster.shift')
+            ->whereHas('roster', fn($q) => $q->where('user_id', $user->id))
+            ->whereNotNull('waktu_masuk')
+            ->whereNull('waktu_pulang')
+            ->latest('waktu_masuk')
             ->first();
 
-        if (!$roster) {
-            return response()->json(['success' => false, 'message' => 'Anda tidak memiliki jadwal dinas untuk hari ini.'], 422);
+        if (!$activeLog) {
+            return response()->json(['success' => false, 'message' => 'Anda belum melakukan absen masuk yang aktif untuk shift ini.'], 422);
         }
 
-        $log = LogAbsensi::where('roster_id', $roster->id)->first();
-        if (!$log || $log->waktu_masuk === null) {
-            return response()->json(['success' => false, 'message' => 'Anda belum melakukan absen masuk untuk shift ini.'], 422);
-        }
-        if ($log->waktu_pulang !== null) {
-            return response()->json(['success' => false, 'message' => 'Anda sudah melakukan absen pulang untuk shift ini.'], 422);
-        }
+        $roster = $activeLog->roster;
 
-        // ===== GEOFENCING (sama seperti clockIn) =====
-        $pengaturan  = PengaturanAplikasi::first();
+        // ===== GEOFENCING =====
+        $pengaturan = PengaturanAplikasi::first();
         $distance = $this->calculateDistance(
             (float) $request->latitude,
             (float) $request->longitude,
@@ -169,11 +185,16 @@ class AbsensiController extends Controller
             return response()->json(['success' => false, 'message' => 'Absen ditolak. Anda berada di luar radius rumah sakit (Jarak Anda: ' . round($distance) . ' meter).'], 403);
         }
 
-        // ===== JENDELA PULANG: jam pulang -2 jam s/d +3 jam =====
+        // ===== JENDELA PULANG (berdasarkan TANGGAL DINAS roster, bukan hari ini) =====
         $shift          = $roster->shift;
-        $jamMasukShift  = Carbon::parse($today . ' ' . $shift->jam_masuk);
-        $jamPulangShift = Carbon::parse($today . ' ' . $shift->jam_pulang);
-        if ($jamPulangShift->lessThanOrEqualTo($jamMasukShift)) $jamPulangShift->addDay();
+        $tanggalDinas   = Carbon::parse($roster->tanggal_dinas)->toDateString();
+        $jamMasukShift  = Carbon::parse($tanggalDinas . ' ' . $shift->jam_masuk);
+        $jamPulangShift = Carbon::parse($tanggalDinas . ' ' . $shift->jam_pulang);
+
+        // Jika shift overnight (jam pulang <= jam masuk), geser pulang ke besok
+        if ($jamPulangShift->lessThanOrEqualTo($jamMasukShift)) {
+            $jamPulangShift->addDay();
+        }
 
         $outStart = $jamPulangShift->copy()->subMinutes(120);
         $outEnd   = $jamPulangShift->copy()->addMinutes(180);
@@ -193,7 +214,7 @@ class AbsensiController extends Controller
         $filename = 'out_' . $nik . '_' . time() . '.' . $file->extension();
         $path     = $file->storeAs('absensi_pulang', $filename, 'public');
 
-        $log->update([
+        $activeLog->update([
             'waktu_pulang'      => $now,
             'foto_pulang'       => $path,
             'latitude_pulang'   => $request->latitude,
@@ -210,6 +231,92 @@ class AbsensiController extends Controller
         ], 200);
     }
 
+    /**
+     * INFO SHIFT HARI INI (untuk Mobile)
+     * Sekarang juga mendeteksi shift malam kemarin yang masih berjalan.
+     */
+    public function infoShiftHariIni(Request $request)
+    {
+        $user  = $request->user();
+        $now   = Carbon::now();
+        $today = $now->toDateString();
+
+        $roster = JadwalRoster::with('shift')
+            ->where('user_id', $user->id)
+            ->where('tanggal_dinas', $today)
+            ->first();
+
+        // FALLBACK: shift malam kemarin yang masih berjalan (lewat tengah malam)
+        if (!$roster) {
+            $roster = $this->cariRosterShiftMalamAktif($user->id, $now);
+        }
+
+        if (!$roster) {
+            return response()->json(['success' => true, 'data' => null], 200);
+        }
+
+        $tanggalDinas = Carbon::parse($roster->tanggal_dinas)->toDateString();
+        $jamMasuk     = Carbon::parse($tanggalDinas . ' ' . $roster->shift->jam_masuk);
+        $jamPulang    = Carbon::parse($tanggalDinas . ' ' . $roster->shift->jam_pulang);
+
+        if ($jamPulang->lessThanOrEqualTo($jamMasuk)) {
+            $jamPulang->addDay();
+        }
+
+        $maxMenit     = intdiv($now->getTimestamp() - $jamPulang->getTimestamp(), 60);
+        $menitTersisa = (int) $now->diffInMinutes($jamPulang, false);
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'tanggal_dinas' => $tanggalDinas,
+                'jam_masuk'     => $roster->shift->jam_masuk,
+                'jam_pulang'    => $roster->shift->jam_pulang,
+                'max_menit'     => max(0, $maxMenit),          // key lama (tetap, utk kompatibilitas Mobile)
+                'menit_tersisa' => $menitTersisa,              // key baru: sisa menit s/d jam pulang
+                'status_shift'  => $menitTersisa > 0 ? 'sedang_aktif' : 'selesai',
+            ],
+        ], 200);
+    }
+
+    /**
+     * HELPER: Mencari roster shift malam KEMARIN yang masih aktif sekarang.
+     * Hanya berlaku untuk shift yang melewati tengah malam (jam pulang < jam masuk)
+     * dan waktu sekarang masih di dalam jendela kerjanya.
+     */
+    private function cariRosterShiftMalamAktif(int $userId, Carbon $now): ?JadwalRoster
+    {
+        $yesterday = Carbon::yesterday()->toDateString();
+
+        $roster = JadwalRoster::with('shift')
+            ->where('user_id', $userId)
+            ->where('tanggal_dinas', $yesterday)
+            ->first();
+
+        if (!$roster || !$roster->shift) {
+            return null;
+        }
+
+        $jamMasuk  = Carbon::parse($yesterday . ' ' . $roster->shift->jam_masuk);
+        $jamPulang = Carbon::parse($yesterday . ' ' . $roster->shift->jam_pulang);
+
+        // Hanya proses shift overnight (lewat tengah malam)
+        if ($jamPulang->greaterThan($jamMasuk)) {
+            return null;
+        }
+        $jamPulang->addDay();
+
+        // ✅ Batas masuk cepat yang sama: maksimal 2 jam sebelum jam shift
+        if ($now->betweenIncluded($jamMasuk->copy()->subMinutes(self::MASUK_CEPAT_MAKS_MENIT), $jamPulang->copy()->addMinutes(120))) {
+            return $roster;
+        }
+
+        return null;
+    }
+
+    /**
+     * Hitung jarak (meter) antara dua titik koordinat (Haversine)
+     */
     private function calculateDistance(float $lat1, float $lon1, float $lat2, float $lon2): float
     {
         $earthRadius = 6371000; // meter
@@ -221,39 +328,8 @@ class AbsensiController extends Controller
             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
             sin($lonDelta / 2) * sin($lonDelta / 2);
 
-        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+        $c = 2 * atan2(sqrt($a), sqrt($a * -1 + 1)); // atan2(sqrt(a), sqrt(1-a))
 
         return $earthRadius * $c;
-    }
-
-    public function infoShiftHariIni(Request $request)
-    {
-        $user  = $request->user();
-        $today = now()->toDateString();
-
-        $roster = JadwalRoster::with('shift')
-            ->where('user_id', $user->id)
-            ->where('tanggal_dinas', $today)
-            ->first();
-
-        if (!$roster) {
-            return response()->json(['success' => true, 'data' => null], 200);
-        }
-
-        $jamPulang = Carbon::parse($today . ' ' . $roster->shift->jam_pulang);
-        if (Carbon::parse($roster->shift->jam_pulang)->lessThan(Carbon::parse($roster->shift->jam_masuk))) {
-            $jamPulang->addDay();
-        }
-
-        $maxMenit = intdiv(now()->getTimestamp() - $jamPulang->getTimestamp(), 60);
-
-        return response()->json([
-            'success' => true,
-            'data'    => [
-                'jam_masuk'  => $roster->shift->jam_masuk,
-                'jam_pulang' => $roster->shift->jam_pulang,
-                'max_menit'  => max(0, $maxMenit),
-            ],
-        ], 200);
     }
 }

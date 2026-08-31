@@ -197,8 +197,8 @@ class WebLaporanController extends Controller
         $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
 
         $logs = LogAbsensi::with(['roster.user.unitKerja'])
-            ->whereMonth('waktu_masuk', $bulan)
-            ->whereYear('waktu_masuk', $tahun)
+            ->whereMonth('tanggal_dinas', $bulan)      // <-- GANTI
+            ->whereYear('tanggal_dinas', $tahun)       // <-- GANTI
             // Filter 1: unit spesifik dari dropdown (LEWAT roster -> user)
             ->when($unit, fn($q) => $q->whereHas('roster.user', fn($u) => $u->where('unit_kerja_id', $unit)))
             // Filter 2: hak akses user login (LEWAT roster -> user)
