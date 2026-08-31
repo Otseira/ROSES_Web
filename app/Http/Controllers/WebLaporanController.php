@@ -16,7 +16,19 @@ class WebLaporanController extends Controller
         $tahun = (int) $request->input('tahun', now()->year);
         $unit  = $request->input('unit');
 
-        [$logs, $lemburs] = $this->buildData($bulan, $tahun, $unit);
+        // === LOGIKA HAK AKSES MULTI-UNIT ===
+        $userLogin = $request->user();
+        $allowedUnitIds = $this->getAllowedUnitIds($userLogin);
+
+        // Jika user tidak punya akses global, batasi filter unit
+        if ($allowedUnitIds !== null) {
+            // Jika user coba akses unit yang bukan miliknya -> tolak
+            if ($unit && !in_array($unit, $allowedUnitIds)) {
+                abort(403, 'Anda tidak memiliki akses untuk melihat laporan unit tersebut.');
+            }
+        }
+
+        [$logs, $lemburs] = $this->buildData($bulan, $tahun, $unit, $allowedUnitIds);
 
         // ✅ Statistik ringkasan periode
         $stats = [
@@ -28,7 +40,16 @@ class WebLaporanController extends Controller
             'jam_lembur' => round($lemburs->flatten()->sum('total_jam_lembur'), 1),
         ];
 
-        $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
+        // === FILTER DROPDOWN UNIT ===
+        // Tampilkan semua unit jika user punya akses global, 
+        // atau hanya unit yang dikelola jika Kepala Unit
+        if ($allowedUnitIds !== null) {
+            $units = MasterUnitKerja::whereIn('id', $allowedUnitIds)
+                ->orderBy('nama_unit', 'asc')
+                ->get();
+        } else {
+            $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
+        }
 
         return view('laporan.laporan', compact('bulan', 'tahun', 'unit', 'logs', 'lemburs', 'stats', 'units'));
     }
@@ -42,7 +63,15 @@ class WebLaporanController extends Controller
         $tahun = (int) $request->input('tahun', now()->year);
         $unit  = $request->input('unit');
 
-        [$logs, $lemburs] = $this->buildData($bulan, $tahun, $unit);
+        // === LOGIKA HAK AKSES MULTI-UNIT ===
+        $userLogin = $request->user();
+        $allowedUnitIds = $this->getAllowedUnitIds($userLogin);
+
+        if ($allowedUnitIds !== null && $unit && !in_array($unit, $allowedUnitIds)) {
+            abort(403, 'Anda tidak memiliki akses untuk mengekspor laporan unit tersebut.');
+        }
+
+        [$logs, $lemburs] = $this->buildData($bulan, $tahun, $unit, $allowedUnitIds);
 
         $rows = [];
         $rows[] = ['REKAP ABSENSI & LEMBUR - ' . strtoupper(now()->month($bulan)->translatedFormat('F Y'))];
@@ -117,12 +146,39 @@ class WebLaporanController extends Controller
         $tahun = (int) $request->input('tahun', now()->year);
         $unit  = $request->input('unit');
 
-        [$logs, $lemburs] = $this->buildData($bulan, $tahun, $unit);
+        // === LOGIKA HAK AKSES MULTI-UNIT ===
+        $userLogin = $request->user();
+        $allowedUnitIds = $this->getAllowedUnitIds($userLogin);
+
+        if ($allowedUnitIds !== null && $unit && !in_array($unit, $allowedUnitIds)) {
+            abort(403, 'Anda tidak memiliki akses untuk melihat PDF laporan unit tersebut.');
+        }
+
+        [$logs, $lemburs] = $this->buildData($bulan, $tahun, $unit, $allowedUnitIds);
 
         return view('laporan.pdf', compact('bulan', 'tahun', 'logs', 'lemburs'));
     }
 
-    private function buildData(int $bulan, int $tahun, $unit = null)
+    /**
+     * BARU: Helper untuk mendapatkan daftar unit yang boleh diakses user
+     */
+    private function getAllowedUnitIds($user): ?array
+    {
+        if ($user->hasGlobalAccess()) {
+            return null; // null = akses semua unit
+        }
+
+        $ids = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
+
+        // Tambahkan unit utama jika belum ada di daftar kelola
+        if ($user->unit_kerja_id && !in_array($user->unit_kerja_id, $ids)) {
+            $ids[] = $user->unit_kerja_id;
+        }
+
+        return $ids;
+    }
+
+    private function buildData(int $bulan, int $tahun, $unit = null, ?array $allowedUnitIds = null)
     {
         $pengaturan = PengaturanAplikasi::first();
         $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
@@ -131,7 +187,12 @@ class WebLaporanController extends Controller
         $logs = LogAbsensi::with(['user.unitKerja', 'roster.user.unitKerja'])
             ->whereMonth('waktu_masuk', $bulan)
             ->whereYear('waktu_masuk', $tahun)
+            // Filter 1: Berdasarkan unit spesifik dari request
             ->when($unit, fn($q) => $q->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unit)))
+            // Filter 2: Batasi berdasarkan hak akses user (Kepala Unit hanya lihat unitnya)
+            ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {
+                $q->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+            })
             ->orderBy('waktu_masuk')
             ->get()
             ->map(function ($log) use ($lat, $lng) {
@@ -162,7 +223,12 @@ class WebLaporanController extends Controller
         $lemburs = LogLembur::with('user')
             ->whereMonth('waktu_mulai_lembur', $bulan)
             ->whereYear('waktu_mulai_lembur', $tahun)
+            // Filter 1: Berdasarkan unit spesifik dari request
             ->when($unit, fn($q) => $q->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unit)))
+            // Filter 2: Batasi berdasarkan hak akses user
+            ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {
+                $q->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+            })
             ->orderBy('waktu_mulai_lembur')
             ->get()
             ->groupBy(fn($l) => $l->user_id . '|' . $l->waktu_mulai_lembur->toDateString());
