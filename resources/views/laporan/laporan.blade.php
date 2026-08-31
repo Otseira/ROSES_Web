@@ -5,7 +5,7 @@
 @section('content')
 <div class="space-y-6 mb-10">
 
-    {{-- ===== KARTU STATISTIK ===== --}}
+    {{-- ===== KARTU STATISTIK (TETAP GLOBAL, TIDAK DIKELOMPOKKAN) ===== --}}
     <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
         <div class="bg-white rounded-2xl border border-slate-100/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-5">
             <div class="flex items-center gap-3">
@@ -61,10 +61,8 @@
         </div>
     </div>
 
-    {{-- ===== TABEL REKAP ===== --}}
+    {{-- ===== FILTER & EXPORT (TETAP SAMA) ===== --}}
     <div class="bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/60 p-8">
-
-        {{-- Filter & Export --}}
         <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-8">
             <form method="GET" action="/laporan-payroll" class="flex flex-wrap items-center gap-3">
                 <select name="bulan"
@@ -104,12 +102,28 @@
             </div>
         </div>
 
-        <h4 class="font-extrabold text-slate-800 mb-4">
+        <h4 class="font-extrabold text-slate-800 mb-6">
             Detail Log Absensi — {{ now()->month($bulan)->translatedFormat('F Y') }}
             @if($unit) <span class="text-primary">• {{ $units->firstWhere('id', $unit)?->nama_unit }}</span> @endif
         </h4>
 
-        <div class="overflow-x-auto rounded-2xl border border-slate-100">
+        {{-- ===== BARU: LOOP PER KELOMPOK UNIT ===== --}}
+        @forelse($logsGrouped as $namaUnit => $groupLogs)
+        {{-- Header Unit --}}
+        <div class="mb-3 mt-8 first:mt-0">
+            <div class="bg-slate-800 text-white px-6 py-3 rounded-t-2xl flex items-center justify-between">
+                <h5 class="text-sm font-extrabold uppercase tracking-widest flex items-center gap-2">
+                    <i data-lucide="building-2" class="w-4 h-4"></i>
+                    {{ $namaUnit }}
+                </h5>
+                <span class="bg-white/10 px-3 py-1 rounded-full text-xs font-bold">
+                    {{ $groupLogs->count() }} absensi
+                </span>
+            </div>
+        </div>
+
+        {{-- Tabel per Unit --}}
+        <div class="overflow-x-auto rounded-b-2xl border border-slate-100">
             <table class="w-full text-left">
                 <thead>
                     <tr class="bg-slate-50 text-slate-500 text-[0.7rem] font-black uppercase tracking-widest">
@@ -128,7 +142,7 @@
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                    @forelse($logs as $log)
+                    @forelse($groupLogs as $log)
                     @php
                     $nama = $log->user?->name ?? $log->roster?->user?->name ?? '-';
                     $unitNama = $log->user?->unitKerja?->nama_unit ?? $log->roster?->user?->unitKerja?->nama_unit ??
@@ -164,7 +178,7 @@
                         <td class="px-5 py-4 whitespace-nowrap">
                             <span
                                 class="px-2.5 py-1 rounded-full text-[10px] font-bold
-                                {{ $log->status_kehadiran == 'Tepat Waktu' ? 'bg-emerald-50 text-emerald-600' : ($log->status_kehadiran == 'Terlambat' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600') }}">
+                                    {{ $log->status_kehadiran == 'Tepat Waktu' ? 'bg-emerald-50 text-emerald-600' : ($log->status_kehadiran == 'Terlambat' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600') }}">
                                 {{ $log->status_kehadiran }}
                             </span>
                         </td>
@@ -207,12 +221,17 @@
                     @empty
                     <tr>
                         <td colspan="12" class="px-5 py-12 text-center text-sm text-slate-400 font-semibold">Belum ada
-                            data absensi pada periode ini.</td>
+                            data absensi pada unit ini.</td>
                     </tr>
                     @endforelse
                 </tbody>
             </table>
         </div>
+        @empty
+        <div class="bg-white rounded-2xl border border-slate-100 p-12 text-center">
+            <p class="text-sm text-slate-400 font-semibold">Belum ada data absensi pada periode ini.</p>
+        </div>
+        @endforelse
     </div>
 </div>
 

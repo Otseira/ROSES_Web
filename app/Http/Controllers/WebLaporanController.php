@@ -20,9 +20,7 @@ class WebLaporanController extends Controller
         $userLogin = $request->user();
         $allowedUnitIds = $this->getAllowedUnitIds($userLogin);
 
-        // Jika user tidak punya akses global, batasi filter unit
         if ($allowedUnitIds !== null) {
-            // Jika user coba akses unit yang bukan miliknya -> tolak
             if ($unit && !in_array($unit, $allowedUnitIds)) {
                 abort(403, 'Anda tidak memiliki akses untuk melihat laporan unit tersebut.');
             }
@@ -30,7 +28,7 @@ class WebLaporanController extends Controller
 
         [$logs, $lemburs] = $this->buildData($bulan, $tahun, $unit, $allowedUnitIds);
 
-        // ✅ Statistik ringkasan periode
+        // === STATISTIK RINGKASAN ===
         $stats = [
             'total'      => $logs->count(),
             'tepat'      => $logs->where('status_kehadiran', 'Tepat Waktu')->count(),
@@ -41,8 +39,6 @@ class WebLaporanController extends Controller
         ];
 
         // === FILTER DROPDOWN UNIT ===
-        // Tampilkan semua unit jika user punya akses global, 
-        // atau hanya unit yang dikelola jika Kepala Unit
         if ($allowedUnitIds !== null) {
             $units = MasterUnitKerja::whereIn('id', $allowedUnitIds)
                 ->orderBy('nama_unit', 'asc')
@@ -51,7 +47,23 @@ class WebLaporanController extends Controller
             $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
         }
 
-        return view('laporan.laporan', compact('bulan', 'tahun', 'unit', 'logs', 'lemburs', 'stats', 'units'));
+        // === BARU: KELOMPOKKAN LOGS BERDASARKAN UNIT KERJA ===
+        $logsGrouped = $logs->groupBy(function ($log) {
+            // Coba ambil unit dari relasi user, fallback ke relasi roster->user
+            $user = $log->user ?? $log->roster?->user;
+            return $user?->unitKerja?->nama_unit ?? 'Tanpa Unit';
+        })->sortKeys(); // urutkan berdasarkan abjad nama unit
+
+        return view('laporan.laporan', compact(
+            'bulan',
+            'tahun',
+            'unit',
+            'logs',
+            'lemburs',
+            'stats',
+            'units',
+            'logsGrouped' // <-- variabel baru
+        ));
     }
 
     /**
