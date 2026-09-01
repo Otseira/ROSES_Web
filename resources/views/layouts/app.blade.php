@@ -25,7 +25,6 @@
         }
     </script>
     <style>
-        /* Custom Scrollbar untuk tampilan yang lebih bersih */
         ::-webkit-scrollbar {
             width: 6px;
             height: 6px;
@@ -54,8 +53,9 @@
             class="bg-primary text-slate-300 transition-all duration-300 flex flex-col shadow-2xl z-20 relative">
 
             @php
-            // Tarik data pengaturan global secara real-time
             $pengaturanGlobal = \App\Models\PengaturanAplikasi::first();
+            // ✅ BARU: ambil role user sekali agar lebih rapi
+            $userRole = auth()->user()->role;
             @endphp
 
             <div class="h-20 flex items-center justify-center border-b border-slate-800/50 px-4">
@@ -79,45 +79,67 @@
             </div>
 
             <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
-                <div x-show="sidebarOpen" class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 mt-2 px-3">Menu Utama</div>
-                
-                <a href="/dashboard" class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('dashboard') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
-                    <i data-lucide="layout-dashboard" class="w-5 h-5 {{ request()->is('dashboard') ? 'text-accent' : 'text-slate-400' }}"></i>
+                <div x-show="sidebarOpen"
+                    class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 mt-2 px-3">Menu Utama
+                </div>
+
+                <a href="/dashboard"
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('dashboard') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
+                    <i data-lucide="layout-dashboard"
+                        class="w-5 h-5 {{ request()->is('dashboard') ? 'text-accent' : 'text-slate-400' }}"></i>
                     <span x-show="sidebarOpen">Dashboard</span>
                 </a>
 
-                @if(in_array(auth()->user()->role, ['superadmin', 'hrd']))
-                <div x-show="sidebarOpen" class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 mt-6 px-3">Master Data</div>
-                <a href="/master-pegawai" class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('master-pegawai*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
-                    <i data-lucide="users" class="w-5 h-5 {{ request()->is('master-pegawai*') ? 'text-accent' : 'text-slate-400' }}"></i>
+                @if(in_array($userRole, ['superadmin', 'hrd']))
+                <div x-show="sidebarOpen"
+                    class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 mt-6 px-3">Master Data
+                </div>
+                <a href="/master-pegawai"
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('master-pegawai*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
+                    <i data-lucide="users"
+                        class="w-5 h-5 {{ request()->is('master-pegawai*') ? 'text-accent' : 'text-slate-400' }}"></i>
                     <span x-show="sidebarOpen">Data Pegawai</span>
                 </a>
-                <a href="/master-shift" class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('master-shift*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
-                    <i data-lucide="clock" class="w-5 h-5 {{ request()->is('master-shift*') ? 'text-accent' : 'text-slate-400' }}"></i>
+                <a href="/master-shift"
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('master-shift*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
+                    <i data-lucide="clock"
+                        class="w-5 h-5 {{ request()->is('master-shift*') ? 'text-accent' : 'text-slate-400' }}"></i>
                     <span x-show="sidebarOpen">Master Shift</span>
                 </a>
                 @endif
 
-                @if(in_array(auth()->user()->role, ['superadmin', 'kepala_unit', 'penanggung_jawab', 'hrd']))
-                <div x-show="sidebarOpen" class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 mt-6 px-3">Operasional & Laporan</div>
-                
-                @if(in_array(auth()->user()->role, ['superadmin', 'kepala_unit', 'penanggung_jawab', 'hrd']))
-                <a href="/roster" class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('roster*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
-                    <i data-lucide="calendar-days" class="w-5 h-5 {{ request()->is('roster*') ? 'text-accent' : 'text-slate-400' }}"></i>
+                {{-- ✅ PERUBAHAN 1: Tambahkan 'manajer' ke section Operasional & Laporan --}}
+                @if(in_array($userRole, ['superadmin', 'hrd', 'manajer', 'kepala_unit', 'penanggung_jawab']))
+                <div x-show="sidebarOpen"
+                    class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 mt-6 px-3">Operasional &
+                    Laporan</div>
+
+                {{-- ✅ PERUBAHAN 2: Tambahkan 'manajer' juga ke link Roster Jadwal --}}
+                @if(in_array($userRole, ['superadmin', 'hrd', 'manajer', 'kepala_unit', 'penanggung_jawab']))
+                <a href="/roster"
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('roster*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
+                    <i data-lucide="calendar-days"
+                        class="w-5 h-5 {{ request()->is('roster*') ? 'text-accent' : 'text-slate-400' }}"></i>
                     <span x-show="sidebarOpen">Roster Jadwal</span>
                 </a>
                 @endif
 
-                <a href="/laporan-payroll" class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('laporan-payroll*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
-                    <i data-lucide="calculator" class="w-5 h-5 {{ request()->is('laporan-payroll*') ? 'text-accent' : 'text-slate-400' }}"></i>
+                <a href="/laporan-payroll"
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('laporan-payroll*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
+                    <i data-lucide="calculator"
+                        class="w-5 h-5 {{ request()->is('laporan-payroll*') ? 'text-accent' : 'text-slate-400' }}"></i>
                     <span x-show="sidebarOpen">Rekap Laporan</span>
                 </a>
                 @endif
 
-                @if(auth()->user()->role === 'superadmin')
-                <div x-show="sidebarOpen" class="text-xs font-semibold text-rose-400 uppercase tracking-wider mb-4 mt-6 px-3">Super Admin</div>
-                <a href="/pengaturan" class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('pengaturan*') ? 'bg-rose-500/10 text-rose-400 font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
-                    <i data-lucide="settings" class="w-5 h-5 {{ request()->is('pengaturan*') ? 'text-rose-400' : 'text-slate-400' }}"></i>
+                @if($userRole === 'superadmin')
+                <div x-show="sidebarOpen"
+                    class="text-xs font-semibold text-rose-400 uppercase tracking-wider mb-4 mt-6 px-3">Super Admin
+                </div>
+                <a href="/pengaturan"
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('pengaturan*') ? 'bg-rose-500/10 text-rose-400 font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
+                    <i data-lucide="settings"
+                        class="w-5 h-5 {{ request()->is('pengaturan*') ? 'text-rose-400' : 'text-slate-400' }}"></i>
                     <span x-show="sidebarOpen">Pengaturan Sistem</span>
                 </a>
                 @endif
@@ -159,14 +181,14 @@
 
                             <div class="px-4 py-2 border-b border-slate-100 mb-1">
                                 <p class="text-sm text-slate-500">Masuk sebagai</p>
-                                <p class="text-sm font-bold text-slate-800 truncate">{{ auth()->user()->role }}</p>
+                                <p class="text-sm font-bold text-slate-800 truncate">{{ $userRole }}</p>
                             </div>
 
-                            <a href="/profil/ubah-password" class="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-accent transition-colors">
+                            <a href="/profil/ubah-password"
+                                class="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-accent transition-colors">
                                 <i data-lucide="key-round" class="w-4 h-4"></i> Ganti Password
                             </a>
 
-                            <!-- Ubah dari tag <button> di dalam <form> menjadi tag <a> sederhana -->
                             <a href="#"
                                 onclick="event.preventDefault(); document.getElementById('form-logout-rahasia').submit();"
                                 class="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors">
@@ -175,7 +197,6 @@
                         </div>
                     </div>
 
-                    <!-- Letakkan form logout ini di luar dropdown, tersembunyi (hidden) -->
                     <form id="form-logout-rahasia" action="/logout" method="POST" style="display: none;">
                         @csrf
                     </form>
