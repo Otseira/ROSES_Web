@@ -197,7 +197,7 @@ $shiftMap[(string) $s->id] = [
 <script>
     document.addEventListener('DOMContentLoaded', function () {
 
-        // ---------- Baca data dari atribut HTML (JavaScript murni, tanpa Blade) ----------
+        // ---------- Baca data dari atribut HTML ----------
         const dataEl = document.getElementById('roster-data');
         const SHIFT_MAP = JSON.parse(dataEl.dataset.shiftMap);
         const BULAN = parseInt(dataEl.dataset.bulan, 10);
@@ -207,9 +207,11 @@ $shiftMap[(string) $s->id] = [
         let activeShift = '';
         let painting = false;
 
-        // ---------- Palet Shift ----------
+        // ✅ FIX: Deklarasi chips SEBELUM dipakai
+        const chips = document.querySelectorAll('.shift-chip');
         const infoBox = document.getElementById('shift-info');
 
+        // ---------- Fungsi ganti shift aktif ----------
         function setActiveShift(value) {
             activeShift = value;
             chips.forEach(function (c) {
@@ -217,7 +219,6 @@ $shiftMap[(string) $s->id] = [
                 if (c.dataset.shift === value) c.classList.add('ring-4', 'ring-slate-400/60', 'scale-105');
             });
 
-            // ✅ Tampilkan nama shift + jam dinas yang sedang dipilih
             if (infoBox) {
                 const key = (value === '' || value === null || value === undefined) ? '' : String(value);
                 const info = SHIFT_MAP[key];
@@ -229,17 +230,29 @@ $shiftMap[(string) $s->id] = [
                 }
             }
         }
+
+        // ---------- Event listener untuk setiap chip ----------
         chips.forEach(function (chip) {
-            chip.addEventListener('click', function () { setActiveShift(chip.dataset.shift); });
+            chip.addEventListener('click', function () {
+                setActiveShift(chip.dataset.shift);
+            });
         });
-        if (chips.length > 1) { setActiveShift(chips[1].dataset.shift); } else { setActiveShift(''); }
+
+        // Set chip pertama sebagai aktif (jika ada)
+        if (chips.length > 0) {
+            setActiveShift(chips[0].dataset.shift);
+        } else {
+            setActiveShift('');
+        }
 
         // ---------- Fungsi mengecat sel ----------
         function styleCell(cell, shiftId) {
             const key = (shiftId === '' || shiftId === null || shiftId === undefined) ? '' : String(shiftId);
             const info = SHIFT_MAP[key] || SHIFT_MAP[''];
 
-            Object.values(SHIFT_MAP).forEach(function (m) { m.cls.split(' ').forEach(function (c) { cell.classList.remove(c); }); });
+            Object.values(SHIFT_MAP).forEach(function (m) {
+                m.cls.split(' ').forEach(function (c) { cell.classList.remove(c); });
+            });
             info.cls.split(' ').forEach(function (c) { cell.classList.add(c); });
 
             cell.dataset.shift = key;
