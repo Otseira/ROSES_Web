@@ -17,15 +17,11 @@ class WebRosterController extends Controller
     private function allowedUnitIds(User $user): ?array
     {
         if ($user->hasGlobalAccess()) {
-            return null;
+            return null; // HRD / Direktur / Superadmin lihat semua
         }
 
-        // ✅ BARU: HANYA unit yang DICENTANG pada "Unit yang Dikelola".
-        // Unit utama (unit_kerja_id) TIDAK otomatis dimasukkan,
-        // sehingga kepala instalasi tidak muncul sebagai karyawan yang dikelola.
+        // Hanya unit yang dicentang pada "Unit yang Dikelola"
         return $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
-
-        return $ids;
     }
 
     public function index(Request $request)
@@ -55,12 +51,21 @@ class WebRosterController extends Controller
             ->orderBy('name')
             ->get();
 
-        // KELOMPOKKAN STAF BERDASARKAN UNIT KERJA
         $stafGrouped = $staf->groupBy(function ($u) {
             return $u->unitKerja ? $u->unitKerja->nama_unit : 'Tanpa Unit';
         })->sortKeys();
 
-        $shifts = MasterShift::orderBy('jam_masuk')->get();
+        // ✅ BARU: PALET SHIFT HANYA UNTUK UNIT YANG DIKELOLA
+        $shiftsQuery = MasterShift::query()->orderBy('jam_masuk');
+
+        if ($allowed !== null) {
+            $shiftsQuery->where(function ($q) use ($allowed) {
+                $q->whereIn('unit_kerja_id', $allowed)
+                    ->orWhereNull('unit_kerja_id'); // shift belum terpetakan tetap tampil (pengaman)
+            });
+        }
+
+        $shifts = $shiftsQuery->get();
 
         return view('roster', compact('stafGrouped', 'shifts', 'bulan', 'tahun', 'jumlahHari'));
     }
