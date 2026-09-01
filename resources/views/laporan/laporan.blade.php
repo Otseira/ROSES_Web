@@ -141,32 +141,21 @@
             </div>
         </div>
 
-        {{-- ✅ BARU: Info Rentang Tanggal yang Aktif --}}
-        <div
-            class="mb-6 p-4 rounded-xl {{ $useCustomRange ? 'bg-primary/5 border border-primary/20' : 'bg-slate-50 border border-slate-200' }}">
+        {{-- ===== INFO PERIODE AKTIF ===== --}}
+        <div class="mb-6 p-4 rounded-xl bg-slate-50 border border-slate-200">
             <div class="flex items-center gap-3">
                 <div
-                    class="w-10 h-10 {{ $useCustomRange ? 'bg-primary text-white' : 'bg-slate-200 text-slate-600' }} rounded-xl flex items-center justify-center flex-shrink-0">
-                    <i data-lucide="{{ $useCustomRange ? 'calendar-range' : 'calendar' }}" class="w-5 h-5"></i>
+                    class="w-10 h-10 bg-slate-800 text-white rounded-xl flex items-center justify-center flex-shrink-0">
+                    <i data-lucide="calendar-range" class="w-5 h-5"></i>
                 </div>
                 <div class="flex-1">
-                    <p
-                        class="text-[10px] font-black uppercase tracking-widest {{ $useCustomRange ? 'text-primary' : 'text-slate-500' }}">
-                        {{ $useCustomRange ? '🎯 Filter Tanggal Custom' : '📅 Periode Cut-Off Payroll' }}
-                    </p>
+                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">Periode Rekap</p>
                     <p class="text-sm font-bold text-slate-800">
                         {{ \Carbon\Carbon::parse($startDate)->translatedFormat('d F Y') }}
                         <span class="text-slate-400 mx-1">s/d</span>
                         {{ \Carbon\Carbon::parse($endDate)->translatedFormat('d F Y') }}
                     </p>
                 </div>
-                @if($useCustomRange)
-                <span
-                    class="hidden sm:inline-block bg-primary text-white text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Custom</span>
-                @else
-                <span
-                    class="hidden sm:inline-block bg-slate-200 text-slate-600 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Auto</span>
-                @endif
             </div>
         </div>
 
