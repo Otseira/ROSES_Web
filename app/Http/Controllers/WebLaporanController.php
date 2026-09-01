@@ -6,6 +6,7 @@ use App\Models\LogAbsensi;
 use App\Models\LogLembur;
 use App\Models\MasterUnitKerja;
 use App\Models\PengaturanAplikasi;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 
 class WebLaporanController extends Controller
@@ -15,6 +16,8 @@ class WebLaporanController extends Controller
         $bulan = (int) $request->input('bulan', now()->month);
         $tahun = (int) $request->input('tahun', now()->year);
         $unit  = $request->input('unit');
+        $tglMulai  = $request->input('tanggal_mulai');   // ✅ BARU
+        $tglSelesai = $request->input('tanggal_selesai'); // ✅ BARU
 
         // === LOGIKA HAK AKSES MULTI-UNIT ===
         $userLogin = $request->user();
@@ -26,9 +29,23 @@ class WebLaporanController extends Controller
             }
         }
 
-        [$logs, $lemburs] = $this->buildData($bulan, $tahun, $unit, $allowedUnitIds);
+        // === TENTUKAN RENTANG TANGGAL ===
+        $useCustomRange = $tglMulai && $tglSelesai;
+        [$startDate, $endDate] = $this->resolveDateRange(
+            $bulan,
+            $tahun,
+            $tglMulai,
+            $tglSelesai
+        );
 
-        // === STATISTIK RINGKASAN ===
+        [$logs, $lemburs] = $this->buildData(
+            $startDate,
+            $endDate,
+            $unit,
+            $allowedUnitIds
+        );
+
+        // Statistik ringkasan
         $stats = [
             'total'      => $logs->count(),
             'tepat'      => $logs->where('status_kehadiran', 'Tepat Waktu')->count(),
@@ -38,21 +55,19 @@ class WebLaporanController extends Controller
             'jam_lembur' => round($lemburs->flatten()->sum('total_jam_lembur'), 1),
         ];
 
-        // === FILTER DROPDOWN UNIT ===
+        // Dropdown unit
         if ($allowedUnitIds !== null) {
             $units = MasterUnitKerja::whereIn('id', $allowedUnitIds)
-                ->orderBy('nama_unit', 'asc')
-                ->get();
+                ->orderBy('nama_unit', 'asc')->get();
         } else {
             $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
         }
 
-        // === BARU: KELOMPOKKAN LOGS BERDASARKAN UNIT KERJA ===
+        // Kelompokkan per unit
         $logsGrouped = $logs->groupBy(function ($log) {
-            // Coba ambil unit dari relasi user, fallback ke relasi roster->user
             $user = $log->user ?? $log->roster?->user;
             return $user?->unitKerja?->nama_unit ?? 'Tanpa Unit';
-        })->sortKeys(); // urutkan berdasarkan abjad nama unit
+        })->sortKeys();
 
         return view('laporan.laporan', compact(
             'bulan',
@@ -62,20 +77,23 @@ class WebLaporanController extends Controller
             'lemburs',
             'stats',
             'units',
-            'logsGrouped' // <-- variabel baru
+            'logsGrouped',
+            'tglMulai',
+            'tglSelesai',
+            'useCustomRange',
+            'startDate',
+            'endDate'
         ));
     }
 
-    /**
-     * Export EXCEL — kolom Lembur & On-Call TERPISAH (dalam satuan menit)
-     */
     public function exportExcel(Request $request)
     {
         $bulan = (int) $request->input('bulan', now()->month);
         $tahun = (int) $request->input('tahun', now()->year);
         $unit  = $request->input('unit');
+        $tglMulai  = $request->input('tanggal_mulai');
+        $tglSelesai = $request->input('tanggal_selesai');
 
-        // === LOGIKA HAK AKSES MULTI-UNIT ===
         $userLogin = $request->user();
         $allowedUnitIds = $this->getAllowedUnitIds($userLogin);
 
@@ -83,10 +101,25 @@ class WebLaporanController extends Controller
             abort(403, 'Anda tidak memiliki akses untuk mengekspor laporan unit tersebut.');
         }
 
-        [$logs, $lemburs] = $this->buildData($bulan, $tahun, $unit, $allowedUnitIds);
+        [$startDate, $endDate] = $this->resolveDateRange(
+            $bulan,
+            $tahun,
+            $tglMulai,
+            $tglSelesai
+        );
+        [$logs, $lemburs] = $this->buildData(
+            $startDate,
+            $endDate,
+            $unit,
+            $allowedUnitIds
+        );
+
+        // Header baris
+        $periodLabel = Carbon::parse($startDate)->translatedFormat('d M Y')
+            . ' s/d ' . Carbon::parse($endDate)->translatedFormat('d M Y');
 
         $rows = [];
-        $rows[] = ['REKAP ABSENSI & LEMBUR - ' . strtoupper(now()->month($bulan)->translatedFormat('F Y'))];
+        $rows[] = ['REKAP ABSENSI & LEMBUR - ' . strtoupper($periodLabel)];
         $rows[] = [];
         $rows[] = [
             'Nama',
@@ -107,7 +140,6 @@ class WebLaporanController extends Controller
             $key  = ($log->user_id ?? $log->roster?->user_id) . '|' . optional($log->waktu_masuk)->toDateString();
             $items = $lemburs->get($key);
 
-            // ✅ Pisahkan total menit: LEMBUR vs ON-CALL
             $mLembur = 0;
             $mOncall = 0;
             if ($items) {
@@ -133,8 +165,8 @@ class WebLaporanController extends Controller
                 $log->status_kehadiran,
                 $log->menit_terlambat ?? 0,
                 $log->jarak ?? '-',
-                $mLembur,   // ✅ kolom lembur (menit)
-                $mOncall,   // ✅ kolom on-call (menit)
+                $mLembur,
+                $mOncall,
             ];
         }
 
@@ -143,22 +175,22 @@ class WebLaporanController extends Controller
             $csv .= implode(';', array_map(fn($c) => '"' . str_replace('"', '""', (string) $c) . '"', $row)) . "\n";
         }
 
+        $filename = 'rekap-absensi-' . Carbon::parse($startDate)->format('Y-m-d') . '-' . Carbon::parse($endDate)->format('Y-m-d') . '.csv';
+
         return response($csv, 200, [
             'Content-Type'        => 'text/csv; charset=UTF-8',
-            'Content-Disposition' => 'attachment; filename="rekap-absensi-' . $tahun . '-' . str_pad($bulan, 2, '0', STR_PAD_LEFT) . '.csv"',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
         ]);
     }
 
-    /**
-     * Export PDF — buka di tab baru, render halaman print-friendly
-     */
     public function exportPdf(Request $request)
     {
         $bulan = (int) $request->input('bulan', now()->month);
         $tahun = (int) $request->input('tahun', now()->year);
         $unit  = $request->input('unit');
+        $tglMulai  = $request->input('tanggal_mulai');
+        $tglSelesai = $request->input('tanggal_selesai');
 
-        // === LOGIKA HAK AKSES MULTI-UNIT ===
         $userLogin = $request->user();
         $allowedUnitIds = $this->getAllowedUnitIds($userLogin);
 
@@ -166,44 +198,81 @@ class WebLaporanController extends Controller
             abort(403, 'Anda tidak memiliki akses untuk melihat PDF laporan unit tersebut.');
         }
 
-        [$logs, $lemburs] = $this->buildData($bulan, $tahun, $unit, $allowedUnitIds);
+        [$startDate, $endDate] = $this->resolveDateRange(
+            $bulan,
+            $tahun,
+            $tglMulai,
+            $tglSelesai
+        );
+        [$logs, $lemburs] = $this->buildData(
+            $startDate,
+            $endDate,
+            $unit,
+            $allowedUnitIds
+        );
 
-        return view('laporan.pdf', compact('bulan', 'tahun', 'logs', 'lemburs'));
+        return view('laporan.pdf', compact(
+            'bulan',
+            'tahun',
+            'logs',
+            'lemburs',
+            'tglMulai',
+            'tglSelesai',
+            'startDate',
+            'endDate'
+        ));
     }
 
     /**
-     * BARU: Helper untuk mendapatkan daftar unit yang boleh diakses user
+     * ✅ BARU: Tentukan rentang tanggal efektif.
+     * Jika user mengisi tanggal_mulai & tanggal_selesai → gunakan range custom.
+     * Jika tidak → gunakan logika bulan + cut-off payroll (backwards compatible).
      */
+    private function resolveDateRange(int $bulan, int $tahun, ?string $tglMulai, ?string $tglSelesai): array
+    {
+        if ($tglMulai && $tglSelesai) {
+            $start = Carbon::parse($tglMulai)->startOfDay()->toDateTimeString();
+            $end   = Carbon::parse($tglSelesai)->endOfDay()->toDateTimeString();
+            return [$start, $end];
+        }
+
+        // Fallback: logika cut-off payroll lama
+        $pengaturan     = PengaturanAplikasi::first();
+        $tglMulaiRule   = $pengaturan ? $pengaturan->tanggal_cut_off_mulai : 24;
+        $tglSelesaiRule = $pengaturan ? $pengaturan->tanggal_cut_off_selesai : 23;
+
+        $start = Carbon::createFromDate($tahun, $bulan, $tglMulaiRule)->subMonth()->startOfDay()->toDateTimeString();
+        $end   = Carbon::createFromDate($tahun, $bulan, $tglSelesaiRule)->endOfDay()->toDateTimeString();
+
+        return [$start, $end];
+    }
+
     private function getAllowedUnitIds($user): ?array
     {
         if ($user->hasGlobalAccess()) {
-            return null; // null = akses semua unit
+            return null;
         }
-
         $ids = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
-
-        // Tambahkan unit utama jika belum ada di daftar kelola
         if ($user->unit_kerja_id && !in_array($user->unit_kerja_id, $ids)) {
             $ids[] = $user->unit_kerja_id;
         }
-
         return $ids;
     }
 
-    private function buildData(int $bulan, int $tahun, $unit = null, ?array $allowedUnitIds = null)
+    /**
+     * ✅ UBAH SIGNATURE: sekarang menerima startDate/endDate langsung (bukan bulan/tahun).
+     */
+    private function buildData(string $startDate, string $endDate, $unit = null, ?array $allowedUnitIds = null)
     {
         $pengaturan = PengaturanAplikasi::first();
         $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
         $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
 
-        $logs = LogAbsensi::with(['roster.user.unitKerja'])
-            ->whereMonth('tanggal_dinas', $bulan)      // <-- GANTI
-            ->whereYear('tanggal_dinas', $tahun)       // <-- GANTI
-            // Filter 1: unit spesifik dari dropdown (LEWAT roster -> user)
-            ->when($unit, fn($q) => $q->whereHas('roster.user', fn($u) => $u->where('unit_kerja_id', $unit)))
-            // Filter 2: hak akses user login (LEWAT roster -> user)
+        $logs = LogAbsensi::with(['user.unitKerja', 'roster.user.unitKerja'])
+            ->whereBetween('waktu_masuk', [$startDate, $endDate])
+            ->when($unit, fn($q) => $q->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unit)))
             ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {
-                $q->whereHas('roster.user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+                $q->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
             })
             ->orderBy('waktu_masuk')
             ->get()
@@ -216,12 +285,10 @@ class WebLaporanController extends Controller
                     : null;
                 $log->jarak = $log->jarak_masuk ?? $log->jarak_pulang;
 
-                // ✅ Status kehadiran
                 $log->status_kehadiran = $log->jenis_absen === 'luar_jadwal'
                     ? 'Luar Jadwal'
                     : ((($log->menit_terlambat ?? 0) > 0) ? 'Terlambat' : 'Tepat Waktu');
 
-                // ✅ Durasi kerja
                 if ($log->waktu_masuk && $log->waktu_pulang) {
                     $m = $log->waktu_masuk->diffInMinutes($log->waktu_pulang);
                     $log->durasi_kerja = intdiv($m, 60) . 'j ' . ($m % 60) . 'm';
@@ -232,10 +299,8 @@ class WebLaporanController extends Controller
                 return $log;
             });
 
-        // LogLembur AMAN pakai whereHas('user') karena tabel log_lemburs PUNYA kolom user_id
         $lemburs = LogLembur::with('user')
-            ->whereMonth('waktu_mulai_lembur', $bulan)
-            ->whereYear('waktu_mulai_lembur', $tahun)
+            ->whereBetween('waktu_mulai_lembur', [$startDate, $endDate])
             ->when($unit, fn($q) => $q->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unit)))
             ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {
                 $q->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
@@ -247,9 +312,6 @@ class WebLaporanController extends Controller
         return [$logs, $lemburs];
     }
 
-    /**
-     * Hitung jarak (meter) antara titik kantor dan titik absen
-     */
     private function haversine($lat1, $lon1, $lat2, $lon2): float
     {
         $R = 6371000;

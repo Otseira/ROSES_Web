@@ -160,6 +160,15 @@ $shiftMap[(string) $s->id] = [
                     <tr>
                         <td colspan="{{ $jumlahHari + 1 }}"
                             class="px-6 py-10 text-center text-sm font-bold text-slate-400">
+                            Tidak ada unit yang Anda kelola.<br>
+                            <span class="text-xs font-medium">Silakan centang "Unit yang Dikelola" pada menu Hak Akses
+                                terlebih dahulu.</span>
+                        </td>
+                    </tr>
+                    @endempty
+                    <tr>
+                        <td colspan="{{ $jumlahHari + 1 }}"
+                            class="px-6 py-10 text-center text-sm font-bold text-slate-400">
                             Tidak ada staf pada unit kerja Anda.
                         </td>
                     </tr>

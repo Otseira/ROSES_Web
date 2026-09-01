@@ -5,7 +5,7 @@
 @section('content')
 <div class="space-y-6 mb-10">
 
-    {{-- ===== KARTU STATISTIK (TETAP GLOBAL, TIDAK DIKELOMPOKKAN) ===== --}}
+    {{-- ===== KARTU STATISTIK ===== --}}
     <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
         <div class="bg-white rounded-2xl border border-slate-100/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-5">
             <div class="flex items-center gap-3">
@@ -61,55 +61,128 @@
         </div>
     </div>
 
-    {{-- ===== FILTER & EXPORT (TETAP SAMA) ===== --}}
+    {{-- ===== TABEL REKAP ===== --}}
     <div class="bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/60 p-8">
-        <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-8">
-            <form method="GET" action="/laporan-payroll" class="flex flex-wrap items-center gap-3">
-                <select name="bulan"
-                    class="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none">
-                    @for ($m = 1; $m <= 12; $m++) <option value="{{ $m }}" {{ $bulan==$m ? 'selected' : '' }}>{{
-                        now()->month($m)->translatedFormat('F') }}</option>
+
+        {{-- Filter & Export --}}
+        <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+            <form method="GET" action="/laporan-payroll" class="flex flex-wrap items-end gap-3">
+
+                {{-- ✅ BARU: Filter Rentang Tanggal Custom --}}
+                <div class="flex flex-col">
+                    <label class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Dari
+                        Tanggal</label>
+                    <input type="date" name="tanggal_mulai" value="{{ $tglMulai ?? '' }}"
+                        class="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Sampai
+                        Tanggal</label>
+                    <input type="date" name="tanggal_selesai" value="{{ $tglSelesai ?? '' }}"
+                        class="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
+                </div>
+
+                {{-- Separator --}}
+                <div class="flex flex-col justify-center px-2 py-1">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">atau</span>
+                </div>
+
+                {{-- Filter Bulan & Tahun (existing, dipakai jika tanggal tidak diisi) --}}
+                <div class="flex flex-col">
+                    <label class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Bulan</label>
+                    <select name="bulan"
+                        class="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none">
+                        @for ($m = 1; $m <= 12; $m++) <option value="{{ $m }}" {{ $bulan==$m ? 'selected' : '' }}>{{
+                            now()->month($m)->translatedFormat('F') }}</option>
+                            @endfor
+                    </select>
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Tahun</label>
+                    <select name="tahun"
+                        class="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none">
+                        @for ($y = now()->year; $y >= now()->year - 3; $y--)
+                        <option value="{{ $y }}" {{ $tahun==$y ? 'selected' : '' }}>{{ $y }}</option>
                         @endfor
-                </select>
-                <select name="tahun"
-                    class="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none">
-                    @for ($y = now()->year; $y >= now()->year - 3; $y--)
-                    <option value="{{ $y }}" {{ $tahun==$y ? 'selected' : '' }}>{{ $y }}</option>
-                    @endfor
-                </select>
-                <select name="unit"
-                    class="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none max-w-[220px]">
-                    <option value="">🏢 Semua Unit</option>
-                    @foreach($units as $u)
-                    <option value="{{ $u->id }}" {{ $unit==$u->id ? 'selected' : '' }}>{{ $u->nama_unit }}</option>
-                    @endforeach
-                </select>
+                    </select>
+                </div>
+
+                {{-- Filter Unit --}}
+                <div class="flex flex-col">
+                    <label class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Unit
+                        Kerja</label>
+                    <select name="unit"
+                        class="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none max-w-[220px]">
+                        <option value="">🏢 Semua Unit</option>
+                        @foreach($units as $u)
+                        <option value="{{ $u->id }}" {{ $unit==$u->id ? 'selected' : '' }}>{{ $u->nama_unit }}</option>
+                        @endforeach
+                    </select>
+                </div>
+
                 <button type="submit"
-                    class="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl transition-all">
+                    class="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl transition-all flex items-center gap-2">
                     <i data-lucide="search" class="w-4 h-4"></i>
+                    <span class="text-sm font-bold">Terapkan</span>
                 </button>
+
+                {{-- Tombol Reset Filter --}}
+                <a href="/laporan-payroll"
+                    class="bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-4 py-2.5 rounded-xl transition-all flex items-center gap-2">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                    <span class="text-sm font-bold">Reset</span>
+                </a>
             </form>
 
             <div class="flex flex-wrap gap-3">
-                <a href="/laporan-payroll/excel?bulan={{ $bulan }}&tahun={{ $tahun }}&unit={{ $unit }}"
+                <a href="/laporan-payroll/excel?bulan={{ $bulan }}&tahun={{ $tahun }}&unit={{ $unit }}&tanggal_mulai={{ $tglMulai ?? '' }}&tanggal_selesai={{ $tglSelesai ?? '' }}"
                     class="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-200 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all">
                     <i data-lucide="sheet" class="w-4 h-4"></i> Excel
                 </a>
-                <a href="/laporan-payroll/pdf?bulan={{ $bulan }}&tahun={{ $tahun }}&unit={{ $unit }}" target="_blank"
+                <a href="/laporan-payroll/pdf?bulan={{ $bulan }}&tahun={{ $tahun }}&unit={{ $unit }}&tanggal_mulai={{ $tglMulai ?? '' }}&tanggal_selesai={{ $tglSelesai ?? '' }}"
+                    target="_blank"
                     class="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all">
                     <i data-lucide="file-text" class="w-4 h-4"></i> Cetak PDF
                 </a>
             </div>
         </div>
 
-        <h4 class="font-extrabold text-slate-800 mb-6">
-            Detail Log Absensi — {{ now()->month($bulan)->translatedFormat('F Y') }}
+        {{-- ✅ BARU: Info Rentang Tanggal yang Aktif --}}
+        <div
+            class="mb-6 p-4 rounded-xl {{ $useCustomRange ? 'bg-primary/5 border border-primary/20' : 'bg-slate-50 border border-slate-200' }}">
+            <div class="flex items-center gap-3">
+                <div
+                    class="w-10 h-10 {{ $useCustomRange ? 'bg-primary text-white' : 'bg-slate-200 text-slate-600' }} rounded-xl flex items-center justify-center flex-shrink-0">
+                    <i data-lucide="{{ $useCustomRange ? 'calendar-range' : 'calendar' }}" class="w-5 h-5"></i>
+                </div>
+                <div class="flex-1">
+                    <p
+                        class="text-[10px] font-black uppercase tracking-widest {{ $useCustomRange ? 'text-primary' : 'text-slate-500' }}">
+                        {{ $useCustomRange ? '🎯 Filter Tanggal Custom' : '📅 Periode Cut-Off Payroll' }}
+                    </p>
+                    <p class="text-sm font-bold text-slate-800">
+                        {{ \Carbon\Carbon::parse($startDate)->translatedFormat('d F Y') }}
+                        <span class="text-slate-400 mx-1">s/d</span>
+                        {{ \Carbon\Carbon::parse($endDate)->translatedFormat('d F Y') }}
+                    </p>
+                </div>
+                @if($useCustomRange)
+                <span
+                    class="hidden sm:inline-block bg-primary text-white text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Custom</span>
+                @else
+                <span
+                    class="hidden sm:inline-block bg-slate-200 text-slate-600 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Auto</span>
+                @endif
+            </div>
+        </div>
+
+        <h4 class="font-extrabold text-slate-800 mb-4">
+            Detail Log Absensi
             @if($unit) <span class="text-primary">• {{ $units->firstWhere('id', $unit)?->nama_unit }}</span> @endif
         </h4>
 
-        {{-- ===== BARU: LOOP PER KELOMPOK UNIT ===== --}}
+        {{-- ===== LOOP PER KELOMPOK UNIT (existing) ===== --}}
         @forelse($logsGrouped as $namaUnit => $groupLogs)
-        {{-- Header Unit --}}
         <div class="mb-3 mt-8 first:mt-0">
             <div class="bg-slate-800 text-white px-6 py-3 rounded-t-2xl flex items-center justify-between">
                 <h5 class="text-sm font-extrabold uppercase tracking-widest flex items-center gap-2">
@@ -122,7 +195,6 @@
             </div>
         </div>
 
-        {{-- Tabel per Unit --}}
         <div class="overflow-x-auto rounded-b-2xl border border-slate-100">
             <table class="w-full text-left">
                 <thead>
@@ -150,8 +222,7 @@
                     $key = ($log->user_id ?? $log->roster?->user_id) . '|' .
                     optional($log->waktu_masuk)->toDateString();
                     $items = $lemburs->get($key);
-                    $mLembur = 0;
-                    $mOncall = 0;
+                    $mLembur = 0; $mOncall = 0;
                     if ($items) {
                     foreach ($items as $l) {
                     $mnt = (float) ($l->total_jam_lembur ?? 0) * 60;
@@ -174,7 +245,6 @@
                             optional($log->waktu_pulang)->format('H:i') ?? '-' }}</td>
                         <td class="px-5 py-4 text-sm font-semibold text-slate-600 whitespace-nowrap">{{
                             $log->durasi_kerja ?? '-' }}</td>
-
                         <td class="px-5 py-4 whitespace-nowrap">
                             <span
                                 class="px-2.5 py-1 rounded-full text-[10px] font-bold
@@ -182,14 +252,12 @@
                                 {{ $log->status_kehadiran }}
                             </span>
                         </td>
-
                         <td
                             class="px-5 py-4 text-sm font-semibold {{ ($log->menit_terlambat ?? 0) > 0 ? 'text-rose-600' : 'text-slate-400' }}">
                             {{ ($log->menit_terlambat ?? 0) > 0 ? $log->menit_terlambat . ' mnt' : '—' }}
                         </td>
                         <td class="px-5 py-4 text-sm font-semibold text-slate-600 whitespace-nowrap">{{ $log->jarak !==
                             null ? $log->jarak . ' m' : '-' }}</td>
-
                         <td class="px-5 py-4">
                             <div class="flex gap-1.5">
                                 @if($log->foto_masuk)
@@ -229,7 +297,8 @@
         </div>
         @empty
         <div class="bg-white rounded-2xl border border-slate-100 p-12 text-center">
-            <p class="text-sm text-slate-400 font-semibold">Belum ada data absensi pada periode ini.</p>
+            <p class="text-sm text-slate-400 font-semibold">Belum ada data absensi pada rentang tanggal yang dipilih.
+            </p>
         </div>
         @endforelse
     </div>

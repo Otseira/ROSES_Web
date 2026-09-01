@@ -20,11 +20,10 @@ class WebRosterController extends Controller
             return null;
         }
 
-        $ids = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
-
-        if ($user->unit_kerja_id && !in_array($user->unit_kerja_id, $ids)) {
-            $ids[] = $user->unit_kerja_id;
-        }
+        // ✅ BARU: HANYA unit yang DICENTANG pada "Unit yang Dikelola".
+        // Unit utama (unit_kerja_id) TIDAK otomatis dimasukkan,
+        // sehingga kepala instalasi tidak muncul sebagai karyawan yang dikelola.
+        return $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
 
         return $ids;
     }
