@@ -121,8 +121,9 @@ $shiftMap[(string) $s->id] = [
                         <td colspan="{{ $jumlahHari + 1 }}"
                             class="bg-slate-800 text-white px-6 py-2.5 text-xs font-extrabold uppercase tracking-widest border-y border-slate-700">
                             {{ $namaUnit }}
-                            <span class="ml-2 bg-white/10 px-2 py-0.5 rounded-full text-[10px] font-bold">{{
-                                $groupStaf->count() }} pegawai</span>
+                            <span class="ml-2 bg-white/10 px-2 py-0.5 rounded-full text-[10px] font-bold">
+                                {{ $groupStaf->count() }} pegawai
+                            </span>
                         </td>
                     </tr>
 
@@ -133,7 +134,6 @@ $shiftMap[(string) $s->id] = [
                             class="row-head sticky left-0 z-20 bg-white hover:bg-slate-100 px-6 py-2 whitespace-nowrap text-sm font-extrabold text-slate-800 border-b border-r border-slate-100 shadow-[4px_0_15px_-3px_rgba(0,0,0,0.05)] cursor-pointer transition-colors"
                             title="Klik untuk isi penuh baris {{ $pegawai->name }}">
                             {{ $pegawai->name }}
-                            {{-- BARU: nama unit tampil kecil di bawah nama pegawai --}}
                             <span class="block text-[10px] font-bold text-slate-400">{{ $namaUnit }}</span>
                         </td>
                         @for($i = 1; $i <= $jumlahHari; $i++) @php $tanggalSekarang=$tahun . '-' . str_pad($bulan,
@@ -156,20 +156,15 @@ $shiftMap[(string) $s->id] = [
                             @endfor
                     </tr>
                     @endforeach
+
                     @empty
+                    {{-- ✅ Hanya 1 blok @empty, TIDAK ada @endempty --}}
                     <tr>
                         <td colspan="{{ $jumlahHari + 1 }}"
                             class="px-6 py-10 text-center text-sm font-bold text-slate-400">
                             Tidak ada unit yang Anda kelola.<br>
                             <span class="text-xs font-medium">Silakan centang "Unit yang Dikelola" pada menu Hak Akses
                                 terlebih dahulu.</span>
-                        </td>
-                    </tr>
-                    @endempty
-                    <tr>
-                        <td colspan="{{ $jumlahHari + 1 }}"
-                            class="px-6 py-10 text-center text-sm font-bold text-slate-400">
-                            Tidak ada staf pada unit kerja Anda.
                         </td>
                     </tr>
                     @endforelse

@@ -270,9 +270,9 @@ class WebLaporanController extends Controller
 
         $logs = LogAbsensi::with(['user.unitKerja', 'roster.user.unitKerja'])
             ->whereBetween('waktu_masuk', [$startDate, $endDate])
-            ->when($unit, fn($q) => $q->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unit)))
+            ->when($unit, fn($q) => $q->whereHas('roster.user', fn($u) => $u->where('unit_kerja_id', $unit)))
             ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {
-                $q->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+                $q->whereHas('roster.user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
             })
             ->orderBy('waktu_masuk')
             ->get()
