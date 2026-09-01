@@ -1,53 +1,50 @@
 @extends('layouts.app')
-
 @section('title', 'Master Shift')
-@section('page_title', 'Pengaturan Master Shift')
+@section('page_title', 'Master Shift')
 
 @section('content')
-<div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+<div class="bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/60 p-6 md:p-8">
 
-    <div class="flex justify-between items-center mb-6">
-        <h3 class="text-lg font-bold text-gray-800">Daftar Shift Operasional</h3>
-        <a href="/master-shift/create"
-            class="bg-slate-800 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-slate-700 transition-colors">
-            + Tambah Shift
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div>
+            <h3 class="text-xl font-extrabold text-slate-800">Daftar Shift Operasional</h3>
+            <p class="text-sm text-slate-500 mt-1">Kelola aturan jam kerja per unit kerja.</p>
+        </div>
+        <a href="{{ route('master-shift.create') }}"
+            class="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-md transition-all active:scale-95 flex items-center gap-2">
+            <i data-lucide="plus" class="w-4 h-4"></i> Tambah Shift
         </a>
     </div>
 
     @if(session('success'))
-    <div class="bg-emerald-50 border-l-4 border-emerald-500 p-4 mb-6 rounded text-emerald-700 text-sm font-medium">
-        {{ session('success') }}
+    <div class="mb-4 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm font-bold text-emerald-700">
+        ✅ {{ session('success') }}
     </div>
     @endif
 
     @if($errors->any())
-    <div class="bg-red-50 border-l-4 border-red-500 p-4 mb-6 rounded text-red-700 text-sm font-medium">
-        {{ $errors->first() }}
+    <div class="mb-4 px-4 py-3 rounded-xl bg-rose-50 border border-rose-200 text-sm font-bold text-rose-700">
+        ⚠️ {{ $errors->first() }}
     </div>
     @endif
 
-    <div class="overflow-x-auto border border-gray-200 rounded-md">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-slate-50">
-                <tr>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama
-                        Shift</th>
-                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Unit
-                        Kerja</th>
-                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Jam
-                        Masuk</th>
-                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Jam
-                        Pulang</th>
-                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Toleransi</th>
-                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi
-                    </th>
+    <div class="overflow-x-auto rounded-2xl border border-slate-100">
+        <table class="w-full text-left">
+            <thead>
+                <tr class="bg-slate-50 text-slate-500 text-[0.7rem] font-black uppercase tracking-widest">
+                    <th class="px-5 py-4">Nama Shift</th>
+                    <th class="px-5 py-4">Unit Kerja</th>
+                    <th class="px-5 py-4">Jam Masuk</th>
+                    <th class="px-5 py-4">Jam Pulang</th>
+                    <th class="px-5 py-4">Toleransi</th>
+                    <th class="px-5 py-4 text-center">Aksi</th>
                 </tr>
             </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-                @foreach($shifts as $s)
-                <tr class="hover:bg-slate-50">
-                    <td class="px-4 py-3 whitespace-nowrap text-sm font-bold text-slate-800">{{ $s->nama_shift }}</td>
+            <tbody class="divide-y divide-slate-100">
+                @forelse($shifts as $shift)
+                <tr class="hover:bg-slate-50/60 transition-all">
+                    <td class="px-5 py-4 text-sm font-bold text-slate-800 whitespace-nowrap">{{ $shift->nama_shift }}
+                    </td>
                     <td class="px-5 py-4">
                         @if($shift->unitKerja)
                         <span
@@ -62,28 +59,44 @@
                         </span>
                         @endif
                     </td>
-                    <td
-                        class="px-4 py-3 whitespace-nowrap text-center text-sm font-mono text-emerald-600 font-semibold">
-                        {{ \Carbon\Carbon::parse($s->jam_masuk)->format('H:i') }}</td>
-                    <td class="px-4 py-3 whitespace-nowrap text-center text-sm font-mono text-rose-600 font-semibold">{{
-                        \Carbon\Carbon::parse($s->jam_pulang)->format('H:i') }}</td>
-                    <td class="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-600">{{
-                        $s->toleransi_terlambat_menit }} Menit</td>
-                    <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
-                        <div class="flex justify-end gap-3">
-                            <a href="/master-shift/{{ $s->id }}/edit" class="text-blue-600 hover:text-blue-900">Ubah</a>
-                            <form action="/master-shift/{{ $s->id }}" method="POST"
+                    <td class="px-5 py-4 text-sm font-semibold text-slate-600">{{ substr((string) $shift->jam_masuk, 0,
+                        5) }}</td>
+                    <td class="px-5 py-4 text-sm font-semibold text-slate-600">{{ substr((string) $shift->jam_pulang, 0,
+                        5) }}</td>
+                    <td class="px-5 py-4 text-sm font-semibold text-slate-600 whitespace-nowrap">{{
+                        $shift->toleransi_terlambat_menit }} mnt</td>
+                    <td class="px-5 py-4">
+                        <div class="flex justify-center gap-2">
+                            <a href="{{ route('master-shift.edit', $shift->id) }}"
+                                class="p-2 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-all"
+                                title="Edit">
+                                <i data-lucide="pencil" class="w-4 h-4"></i>
+                            </a>
+                            <form action="{{ route('master-shift.destroy', $shift->id) }}" method="POST"
                                 onsubmit="return confirm('Yakin ingin menghapus shift ini?');">
                                 @csrf
                                 @method('DELETE')
-                                <button type="submit" class="text-red-600 hover:text-red-900">Hapus</button>
+                                <button type="submit"
+                                    class="p-2 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 transition-all"
+                                    title="Hapus">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
                             </form>
                         </div>
                     </td>
                 </tr>
-                @endforeach
+                @empty
+                <tr>
+                    <td colspan="6" class="px-5 py-12 text-center text-sm font-bold text-slate-400">Belum ada data
+                        shift.</td>
+                </tr>
+                @endforelse
             </tbody>
         </table>
     </div>
 </div>
+
+<script>
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+</script>
 @endsection
