@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\MasterShift;
+use App\Models\MasterUnitKerja;
 use Illuminate\Http\Request;
 
 class WebShiftController extends Controller
@@ -12,8 +13,13 @@ class WebShiftController extends Controller
      */
     public function index()
     {
-        $shifts = MasterShift::orderBy('jam_masuk')->get();
-        return view('shift.index', compact('shifts'));
+        // ✅ Muat relasi unit & kelompokkan tampilan per unit
+        $shifts = MasterShift::with('unitKerja')
+            ->orderBy('unit_kerja_id')
+            ->orderBy('jam_masuk')
+            ->get();
+
+        return view('master-shift.index', compact('shifts'));
     }
 
     /**
@@ -21,8 +27,12 @@ class WebShiftController extends Controller
      */
     public function create()
     {
-        return view('shift.create');
+        // ✅ BARU: kirim daftar unit ke form
+        $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
+
+        return view('master-shift.create', compact('units'));
     }
+
 
     /**
      * Menyimpan data shift baru (Store)
@@ -30,40 +40,59 @@ class WebShiftController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'nama_shift' => 'required|string|max:50',
-            'jam_masuk' => 'required|date_format:H:i',
-            'jam_pulang' => 'required|date_format:H:i',
-            'toleransi_terlambat_menit' => 'required|integer|min:0',
+            'nama_shift'  => 'required|string|max:100',
+            'jam_masuk'   => 'required',
+            'jam_pulang'  => 'required',
+            'toleransi_terlambat_menit' => 'nullable|integer|min:0',
+            'unit_kerja_id' => 'nullable|exists:master_unit_kerjas,id', // ✅ BARU
         ]);
 
-        MasterShift::create($request->all());
+        MasterShift::create([
+            'nama_shift'  => $request->nama_shift,
+            'jam_masuk'   => $request->jam_masuk,
+            'jam_pulang'  => $request->jam_pulang,
+            'toleransi_terlambat_menit' => $request->toleransi_terlambat_menit ?? 5,
+            'unit_kerja_id' => $request->unit_kerja_id ?: null, // ✅ BARU
+        ]);
 
-        return redirect('/master-shift')->with('success', 'Data Master Shift baru berhasil ditambahkan.');
+        return redirect('/master-shift')->with('success', 'Shift baru berhasil ditambahkan.');
     }
 
     /**
      * Menampilkan formulir ubah shift (Edit)
      */
-    public function edit(MasterShift $master_shift)
+    public function edit($id)
     {
-        return view('shift.edit', compact('master_shift'));
+        $shift = MasterShift::findOrFail($id);
+        $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get(); // ✅ BARU
+
+        return view('master-shift.edit', compact('shift', 'units'));
     }
 
     /**
      * Memperbarui data shift (Update)
      */
-    public function update(Request $request, MasterShift $master_shift)
+    public function update(Request $request, $id)
     {
+        $shift = MasterShift::findOrFail($id);
+
         $request->validate([
-            'nama_shift' => 'required|string|max:50',
-            'jam_masuk' => 'required|date_format:H:i', // Format jam:menit
-            'jam_pulang' => 'required|date_format:H:i',
-            'toleransi_terlambat_menit' => 'required|integer|min:0',
+            'nama_shift'  => 'required|string|max:100',
+            'jam_masuk'   => 'required',
+            'jam_pulang'  => 'required',
+            'toleransi_terlambat_menit' => 'nullable|integer|min:0',
+            'unit_kerja_id' => 'nullable|exists:master_unit_kerjas,id',
         ]);
 
-        $master_shift->update($request->all());
+        $shift->update([
+            'nama_shift'  => $request->nama_shift,
+            'jam_masuk'   => $request->jam_masuk,
+            'jam_pulang'  => $request->jam_pulang,
+            'toleransi_terlambat_menit' => $request->toleransi_terlambat_menit ?? 5,
+            'unit_kerja_id' => $request->unit_kerja_id ?: null, // ✅ BARU
+        ]);
 
-        return redirect('/master-shift')->with('success', 'Data Master Shift berhasil diperbarui.');
+        return redirect('/master-shift')->with('success', 'Shift berhasil diperbarui.');
     }
 
     /**
