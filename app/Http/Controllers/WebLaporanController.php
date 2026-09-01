@@ -13,37 +13,22 @@ class WebLaporanController extends Controller
 {
     public function index(Request $request)
     {
-        $bulan = (int) $request->input('bulan', now()->month);
-        $tahun = (int) $request->input('tahun', now()->year);
-        $unit  = $request->input('unit');
-        $tglMulai  = $request->input('tanggal_mulai');   // ✅ BARU
-        $tglSelesai = $request->input('tanggal_selesai'); // ✅ BARU
+        $unit       = $request->input('unit');
+        $tglMulai   = $request->input('tanggal_mulai');
+        $tglSelesai = $request->input('tanggal_selesai');
 
         // === LOGIKA HAK AKSES MULTI-UNIT ===
-        $userLogin = $request->user();
+        $userLogin      = $request->user();
         $allowedUnitIds = $this->getAllowedUnitIds($userLogin);
 
-        if ($allowedUnitIds !== null) {
-            if ($unit && !in_array($unit, $allowedUnitIds)) {
-                abort(403, 'Anda tidak memiliki akses untuk melihat laporan unit tersebut.');
-            }
+        if ($allowedUnitIds !== null && $unit && !in_array($unit, $allowedUnitIds)) {
+            abort(403, 'Anda tidak memiliki akses untuk melihat laporan unit tersebut.');
         }
 
-        // === TENTUKAN RENTANG TANGGAL ===
-        $useCustomRange = $tglMulai && $tglSelesai;
-        [$startDate, $endDate] = $this->resolveDateRange(
-            $bulan,
-            $tahun,
-            $tglMulai,
-            $tglSelesai
-        );
+        // === RENTANG TANGGAL (custom atau default) ===
+        [$startDate, $endDate] = $this->resolveDateRange($tglMulai, $tglSelesai);
 
-        [$logs, $lemburs] = $this->buildData(
-            $startDate,
-            $endDate,
-            $unit,
-            $allowedUnitIds
-        );
+        [$logs, $lemburs] = $this->buildData($startDate, $endDate, $unit, $allowedUnitIds);
 
         // Statistik ringkasan
         $stats = [
@@ -69,9 +54,11 @@ class WebLaporanController extends Controller
             return $user?->unitKerja?->nama_unit ?? 'Tanpa Unit';
         })->sortKeys();
 
+        // Untuk kompatibilitas view PDF (label periode)
+        $bulan = Carbon::parse($startDate)->month;
+        $tahun = Carbon::parse($startDate)->year;
+
         return view('laporan.laporan', compact(
-            'bulan',
-            'tahun',
             'unit',
             'logs',
             'lemburs',
@@ -80,45 +67,33 @@ class WebLaporanController extends Controller
             'logsGrouped',
             'tglMulai',
             'tglSelesai',
-            'useCustomRange',
             'startDate',
-            'endDate'
+            'endDate',
+            'bulan',
+            'tahun'
         ));
     }
 
     public function exportExcel(Request $request)
     {
-        $bulan = (int) $request->input('bulan', now()->month);
-        $tahun = (int) $request->input('tahun', now()->year);
-        $unit  = $request->input('unit');
-        $tglMulai  = $request->input('tanggal_mulai');
+        $unit       = $request->input('unit');
+        $tglMulai   = $request->input('tanggal_mulai');
         $tglSelesai = $request->input('tanggal_selesai');
 
-        $userLogin = $request->user();
+        $userLogin      = $request->user();
         $allowedUnitIds = $this->getAllowedUnitIds($userLogin);
 
         if ($allowedUnitIds !== null && $unit && !in_array($unit, $allowedUnitIds)) {
             abort(403, 'Anda tidak memiliki akses untuk mengekspor laporan unit tersebut.');
         }
 
-        [$startDate, $endDate] = $this->resolveDateRange(
-            $bulan,
-            $tahun,
-            $tglMulai,
-            $tglSelesai
-        );
-        [$logs, $lemburs] = $this->buildData(
-            $startDate,
-            $endDate,
-            $unit,
-            $allowedUnitIds
-        );
+        [$startDate, $endDate] = $this->resolveDateRange($tglMulai, $tglSelesai);
+        [$logs, $lemburs] = $this->buildData($startDate, $endDate, $unit, $allowedUnitIds);
 
-        // Header baris
         $periodLabel = Carbon::parse($startDate)->translatedFormat('d M Y')
             . ' s/d ' . Carbon::parse($endDate)->translatedFormat('d M Y');
 
-        $rows = [];
+        $rows   = [];
         $rows[] = ['REKAP ABSENSI & LEMBUR - ' . strtoupper($periodLabel)];
         $rows[] = [];
         $rows[] = [
@@ -136,24 +111,19 @@ class WebLaporanController extends Controller
         ];
 
         foreach ($logs as $log) {
-            $nama = $log->user?->name ?? $log->roster?->user?->name ?? '-';
-            $key  = ($log->user_id ?? $log->roster?->user_id) . '|' . optional($log->waktu_masuk)->toDateString();
+            $nama  = $log->user?->name ?? $log->roster?->user?->name ?? '-';
+            $key   = ($log->user_id ?? $log->roster?->user_id) . '|' . optional($log->waktu_masuk)->toDateString();
             $items = $lemburs->get($key);
 
             $mLembur = 0;
             $mOncall = 0;
             if ($items) {
                 foreach ($items as $l) {
-                    $mnt = (float) ($l->total_jam_lembur ?? 0) * 60;
-                    $norm = str_contains(
-                        strtolower(str_replace(['-', ' ', '_'], '', $l->jenis_lembur ?? '')),
-                        'oncall'
-                    );
+                    $mnt  = (float) ($l->total_jam_lembur ?? 0) * 60;
+                    $norm = str_contains(strtolower(str_replace(['-', ' ', '_'], '', $l->jenis_lembur ?? '')), 'oncall');
                     $norm ? $mOncall += $mnt : $mLembur += $mnt;
                 }
             }
-            $mLembur = (int) round($mLembur);
-            $mOncall = (int) round($mOncall);
 
             $rows[] = [
                 $nama,
@@ -165,8 +135,8 @@ class WebLaporanController extends Controller
                 $log->status_kehadiran,
                 $log->menit_terlambat ?? 0,
                 $log->jarak ?? '-',
-                $mLembur,
-                $mOncall,
+                (int) round($mLembur),
+                (int) round($mOncall),
             ];
         }
 
@@ -185,31 +155,22 @@ class WebLaporanController extends Controller
 
     public function exportPdf(Request $request)
     {
-        $bulan = (int) $request->input('bulan', now()->month);
-        $tahun = (int) $request->input('tahun', now()->year);
-        $unit  = $request->input('unit');
-        $tglMulai  = $request->input('tanggal_mulai');
+        $unit       = $request->input('unit');
+        $tglMulai   = $request->input('tanggal_mulai');
         $tglSelesai = $request->input('tanggal_selesai');
 
-        $userLogin = $request->user();
+        $userLogin      = $request->user();
         $allowedUnitIds = $this->getAllowedUnitIds($userLogin);
 
         if ($allowedUnitIds !== null && $unit && !in_array($unit, $allowedUnitIds)) {
             abort(403, 'Anda tidak memiliki akses untuk melihat PDF laporan unit tersebut.');
         }
 
-        [$startDate, $endDate] = $this->resolveDateRange(
-            $bulan,
-            $tahun,
-            $tglMulai,
-            $tglSelesai
-        );
-        [$logs, $lemburs] = $this->buildData(
-            $startDate,
-            $endDate,
-            $unit,
-            $allowedUnitIds
-        );
+        [$startDate, $endDate] = $this->resolveDateRange($tglMulai, $tglSelesai);
+        [$logs, $lemburs] = $this->buildData($startDate, $endDate, $unit, $allowedUnitIds);
+
+        $bulan = Carbon::parse($startDate)->month;
+        $tahun = Carbon::parse($startDate)->year;
 
         return view('laporan.pdf', compact(
             'bulan',
@@ -224,27 +185,21 @@ class WebLaporanController extends Controller
     }
 
     /**
-     * ✅ BARU: Tentukan rentang tanggal efektif.
-     * Jika user mengisi tanggal_mulai & tanggal_selesai → gunakan range custom.
-     * Jika tidak → gunakan logika bulan + cut-off payroll (backwards compatible).
+     * ✅ Rentang tanggal: pakai input user; jika kosong → 1 bulan berjalan s/d hari ini.
      */
-    private function resolveDateRange(int $bulan, int $tahun, ?string $tglMulai, ?string $tglSelesai): array
+    private function resolveDateRange(?string $tglMulai, ?string $tglSelesai): array
     {
         if ($tglMulai && $tglSelesai) {
-            $start = Carbon::parse($tglMulai)->startOfDay()->toDateTimeString();
-            $end   = Carbon::parse($tglSelesai)->endOfDay()->toDateTimeString();
-            return [$start, $end];
+            return [
+                Carbon::parse($tglMulai)->startOfDay()->toDateTimeString(),
+                Carbon::parse($tglSelesai)->endOfDay()->toDateTimeString(),
+            ];
         }
 
-        // Fallback: logika cut-off payroll lama
-        $pengaturan     = PengaturanAplikasi::first();
-        $tglMulaiRule   = $pengaturan ? $pengaturan->tanggal_cut_off_mulai : 24;
-        $tglSelesaiRule = $pengaturan ? $pengaturan->tanggal_cut_off_selesai : 23;
-
-        $start = Carbon::createFromDate($tahun, $bulan, $tglMulaiRule)->subMonth()->startOfDay()->toDateTimeString();
-        $end   = Carbon::createFromDate($tahun, $bulan, $tglSelesaiRule)->endOfDay()->toDateTimeString();
-
-        return [$start, $end];
+        return [
+            now()->startOfMonth()->toDateTimeString(),
+            now()->endOfDay()->toDateTimeString(),
+        ];
     }
 
     private function getAllowedUnitIds($user): ?array
@@ -259,16 +214,13 @@ class WebLaporanController extends Controller
         return $ids;
     }
 
-    /**
-     * ✅ UBAH SIGNATURE: sekarang menerima startDate/endDate langsung (bukan bulan/tahun).
-     */
     private function buildData(string $startDate, string $endDate, $unit = null, ?array $allowedUnitIds = null)
     {
         $pengaturan = PengaturanAplikasi::first();
         $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
         $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
 
-        $logs = LogAbsensi::with(['user.unitKerja', 'roster.user.unitKerja'])
+        $logs = LogAbsensi::with(['roster.user.unitKerja'])
             ->whereBetween('waktu_masuk', [$startDate, $endDate])
             ->when($unit, fn($q) => $q->whereHas('roster.user', fn($u) => $u->where('unit_kerja_id', $unit)))
             ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {

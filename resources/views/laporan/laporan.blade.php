@@ -64,17 +64,19 @@
     {{-- ===== TABEL REKAP ===== --}}
     <div class="bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/60 p-8">
 
-        {{-- Filter & Export --}}
+        {{-- ===== FILTER & EXPORT ===== --}}
         <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
             <form method="GET" action="/laporan-payroll" class="flex flex-wrap items-end gap-3">
 
-                {{-- ✅ BARU: Filter Rentang Tanggal Custom --}}
+                {{-- ✅ Dari Tanggal --}}
                 <div class="flex flex-col">
                     <label class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Dari
                         Tanggal</label>
                     <input type="date" name="tanggal_mulai" value="{{ $tglMulai ?? '' }}"
                         class="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
                 </div>
+
+                {{-- ✅ Sampai Tanggal --}}
                 <div class="flex flex-col">
                     <label class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Sampai
                         Tanggal</label>
@@ -82,32 +84,7 @@
                         class="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
                 </div>
 
-                {{-- Separator --}}
-                <div class="flex flex-col justify-center px-2 py-1">
-                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">atau</span>
-                </div>
-
-                {{-- Filter Bulan & Tahun (existing, dipakai jika tanggal tidak diisi) --}}
-                <div class="flex flex-col">
-                    <label class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Bulan</label>
-                    <select name="bulan"
-                        class="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none">
-                        @for ($m = 1; $m <= 12; $m++) <option value="{{ $m }}" {{ $bulan==$m ? 'selected' : '' }}>{{
-                            now()->month($m)->translatedFormat('F') }}</option>
-                            @endfor
-                    </select>
-                </div>
-                <div class="flex flex-col">
-                    <label class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Tahun</label>
-                    <select name="tahun"
-                        class="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none">
-                        @for ($y = now()->year; $y >= now()->year - 3; $y--)
-                        <option value="{{ $y }}" {{ $tahun==$y ? 'selected' : '' }}>{{ $y }}</option>
-                        @endfor
-                    </select>
-                </div>
-
-                {{-- Filter Unit --}}
+                {{-- Unit Kerja --}}
                 <div class="flex flex-col">
                     <label class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Unit
                         Kerja</label>
@@ -126,7 +103,6 @@
                     <span class="text-sm font-bold">Terapkan</span>
                 </button>
 
-                {{-- Tombol Reset Filter --}}
                 <a href="/laporan-payroll"
                     class="bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-4 py-2.5 rounded-xl transition-all flex items-center gap-2">
                     <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
@@ -135,15 +111,33 @@
             </form>
 
             <div class="flex flex-wrap gap-3">
-                <a href="/laporan-payroll/excel?bulan={{ $bulan }}&tahun={{ $tahun }}&unit={{ $unit }}&tanggal_mulai={{ $tglMulai ?? '' }}&tanggal_selesai={{ $tglSelesai ?? '' }}"
+                <a href="/laporan-payroll/excel?tanggal_mulai={{ $tglMulai ?? '' }}&tanggal_selesai={{ $tglSelesai ?? '' }}&unit={{ $unit }}"
                     class="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-200 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all">
                     <i data-lucide="sheet" class="w-4 h-4"></i> Excel
                 </a>
-                <a href="/laporan-payroll/pdf?bulan={{ $bulan }}&tahun={{ $tahun }}&unit={{ $unit }}&tanggal_mulai={{ $tglMulai ?? '' }}&tanggal_selesai={{ $tglSelesai ?? '' }}"
+                <a href="/laporan-payroll/pdf?tanggal_mulai={{ $tglMulai ?? '' }}&tanggal_selesai={{ $tglSelesai ?? '' }}&unit={{ $unit }}"
                     target="_blank"
                     class="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all">
                     <i data-lucide="file-text" class="w-4 h-4"></i> Cetak PDF
                 </a>
+            </div>
+        </div>
+
+        {{-- ===== INFO PERIODE AKTIF ===== --}}
+        <div class="mb-6 p-4 rounded-xl bg-slate-50 border border-slate-200">
+            <div class="flex items-center gap-3">
+                <div
+                    class="w-10 h-10 bg-slate-800 text-white rounded-xl flex items-center justify-center flex-shrink-0">
+                    <i data-lucide="calendar-range" class="w-5 h-5"></i>
+                </div>
+                <div class="flex-1">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">Periode Rekap</p>
+                    <p class="text-sm font-bold text-slate-800">
+                        {{ \Carbon\Carbon::parse($startDate)->translatedFormat('d F Y') }}
+                        <span class="text-slate-400 mx-1">s/d</span>
+                        {{ \Carbon\Carbon::parse($endDate)->translatedFormat('d F Y') }}
+                    </p>
+                </div>
             </div>
         </div>
 
