@@ -141,24 +141,6 @@
             </div>
         </div>
 
-        {{-- ===== INFO PERIODE AKTIF ===== --}}
-        <div class="mb-6 p-4 rounded-xl bg-slate-50 border border-slate-200">
-            <div class="flex items-center gap-3">
-                <div
-                    class="w-10 h-10 bg-slate-800 text-white rounded-xl flex items-center justify-center flex-shrink-0">
-                    <i data-lucide="calendar-range" class="w-5 h-5"></i>
-                </div>
-                <div class="flex-1">
-                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">Periode Rekap</p>
-                    <p class="text-sm font-bold text-slate-800">
-                        {{ \Carbon\Carbon::parse($startDate)->translatedFormat('d F Y') }}
-                        <span class="text-slate-400 mx-1">s/d</span>
-                        {{ \Carbon\Carbon::parse($endDate)->translatedFormat('d F Y') }}
-                    </p>
-                </div>
-            </div>
-        </div>
-
         <h4 class="font-extrabold text-slate-800 mb-4">
             Detail Log Absensi
             @if($unit) <span class="text-primary">• {{ $units->firstWhere('id', $unit)?->nama_unit }}</span> @endif
