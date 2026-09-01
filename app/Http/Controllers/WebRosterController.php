@@ -55,14 +55,11 @@ class WebRosterController extends Controller
             return $u->unitKerja ? $u->unitKerja->nama_unit : 'Tanpa Unit';
         })->sortKeys();
 
-        // ✅ BARU: PALET SHIFT HANYA UNTUK UNIT YANG DIKELOLA
+        // ✅ HANYA shift milik unit yang dikelola (tanpa orWhereNull)
         $shiftsQuery = MasterShift::query()->orderBy('jam_masuk');
 
         if ($allowed !== null) {
-            $shiftsQuery->where(function ($q) use ($allowed) {
-                $q->whereIn('unit_kerja_id', $allowed)
-                    ->orWhereNull('unit_kerja_id'); // shift belum terpetakan tetap tampil (pengaman)
-            });
+            $shiftsQuery->whereIn('unit_kerja_id', $allowed);
         }
 
         $shifts = $shiftsQuery->get();

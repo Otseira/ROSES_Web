@@ -22,7 +22,9 @@ $shiftMap = ['' => ['label' => 'Libur', 'cls' => 'bg-slate-100 text-slate-400']]
 foreach ($shifts as $s) {
 $shiftMap[(string) $s->id] = [
 'label' => \Illuminate\Support\Str::limit($s->nama_shift, 10),
+'full' => $s->nama_shift, // ✅ nama lengkap
 'cls' => $shiftStyle[$s->id],
+'jam' => substr((string) $s->jam_masuk, 0, 5) . '–' . substr((string) $s->jam_pulang, 0, 5), // ✅ jam dinas
 ];
 }
 @endphp
@@ -69,11 +71,14 @@ $shiftMap[(string) $s->id] = [
             Libur / Kosong
         </button>
 
-        {{-- Chip setiap shift --}}
+        {{-- ✅ Chip setiap shift: NAMA + JAM DINAS --}}
         @foreach($shifts as $s)
         <button type="button" data-shift="{{ $s->id }}"
-            class="shift-chip px-4 py-2 rounded-xl text-xs font-extrabold border border-slate-200 {{ $shiftStyle[$s->id] }} transition-all active:scale-95">
+            class="shift-chip px-4 py-2 rounded-xl text-xs font-extrabold border border-slate-200 {{ $shiftStyle[$s->id] }} transition-all active:scale-95 text-center">
             {{ $s->nama_shift }}
+            <span class="block text-[9px] font-bold opacity-70 mt-0.5">
+                {{ substr((string) $s->jam_masuk, 0, 5) }}–{{ substr((string) $s->jam_pulang, 0, 5) }}
+            </span>
         </button>
         @endforeach
 
@@ -93,6 +98,9 @@ $shiftMap[(string) $s->id] = [
         💡 <b>Klik / tahan & geser</b> pada sel = cat jadwal • <b>Klik nama pegawai</b> = isi penuh 1 baris • <b>Klik
             nomor tanggal</b> = isi penuh 1 kolom
     </p>
+    <div id="shift-info"
+        class="hidden mb-3 px-4 py-3 rounded-xl bg-sky-50 border border-sky-200 text-xs font-semibold text-sky-800">
+    </div>
 
     {{-- ===== MATRIKS ROSTER ===== --}}
     <form action="{{ url('/roster/bulk-store') }}" method="POST" id="rosterForm">
@@ -200,13 +208,26 @@ $shiftMap[(string) $s->id] = [
         let painting = false;
 
         // ---------- Palet Shift ----------
-        const chips = document.querySelectorAll('.shift-chip');
+        const infoBox = document.getElementById('shift-info');
+
         function setActiveShift(value) {
             activeShift = value;
             chips.forEach(function (c) {
                 c.classList.remove('ring-4', 'ring-slate-400/60', 'scale-105');
                 if (c.dataset.shift === value) c.classList.add('ring-4', 'ring-slate-400/60', 'scale-105');
             });
+
+            // ✅ Tampilkan nama shift + jam dinas yang sedang dipilih
+            if (infoBox) {
+                const key = (value === '' || value === null || value === undefined) ? '' : String(value);
+                const info = SHIFT_MAP[key];
+                if (key === '' || !info) {
+                    infoBox.classList.add('hidden');
+                } else {
+                    infoBox.classList.remove('hidden');
+                    infoBox.innerHTML = '🕐 Shift: <b>' + info.full + '</b> &nbsp;•&nbsp; Jam Dinas: <b>' + (info.jam || '-') + '</b>';
+                }
+            }
         }
         chips.forEach(function (chip) {
             chip.addEventListener('click', function () { setActiveShift(chip.dataset.shift); });
