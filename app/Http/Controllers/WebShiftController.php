@@ -92,7 +92,7 @@ class WebShiftController extends Controller
             'unit_kerja_id' => $request->unit_kerja_id ?: null, // ✅ BARU
         ]);
 
-        return redirect('/shift')->with('success', 'Shift berhasil diperbarui.');
+        return redirect('/master-shift')->with('success', 'Shift berhasil diperbarui.');
     }
 
     /**
