@@ -19,7 +19,7 @@ class WebShiftController extends Controller
             ->orderBy('jam_masuk')
             ->get();
 
-        return view('master-shift.index', compact('shifts'));
+        return view('shift.index', compact('shifts'));
     }
 
     /**
@@ -30,7 +30,7 @@ class WebShiftController extends Controller
         // ✅ BARU: kirim daftar unit ke form
         $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
 
-        return view('master-shift.create', compact('units'));
+        return view('shift.create', compact('units'));
     }
 
 
@@ -55,7 +55,7 @@ class WebShiftController extends Controller
             'unit_kerja_id' => $request->unit_kerja_id ?: null, // ✅ BARU
         ]);
 
-        return redirect('/master-shift')->with('success', 'Shift baru berhasil ditambahkan.');
+        return redirect('/shift')->with('success', 'Shift baru berhasil ditambahkan.');
     }
 
     /**
@@ -66,7 +66,7 @@ class WebShiftController extends Controller
         $shift = MasterShift::findOrFail($id);
         $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get(); // ✅ BARU
 
-        return view('master-shift.edit', compact('shift', 'units'));
+        return view('shift.edit', compact('shift', 'units'));
     }
 
     /**
@@ -92,7 +92,7 @@ class WebShiftController extends Controller
             'unit_kerja_id' => $request->unit_kerja_id ?: null, // ✅ BARU
         ]);
 
-        return redirect('/master-shift')->with('success', 'Shift berhasil diperbarui.');
+        return redirect('/shift')->with('success', 'Shift berhasil diperbarui.');
     }
 
     /**
