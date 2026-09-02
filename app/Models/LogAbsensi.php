@@ -7,8 +7,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LogAbsensi extends Model
 {
-    protected $table = 'log_absensis';
-
     protected $fillable = [
         'user_id',
         'roster_id',
@@ -27,7 +25,7 @@ class LogAbsensi extends Model
     ];
 
     protected $casts = [
-        'waktu_masuk' => 'datetime',
+        'waktu_masuk'  => 'datetime',
         'waktu_pulang' => 'datetime',
     ];
 
