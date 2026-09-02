@@ -151,7 +151,7 @@ class WebLaporanController extends Controller
 
         // ✅ WRITER Xls (BIFF8) — TIDAK butuh extension zip
         return Excel::download(
-            new \app\Exports\RekapAbsensiPerKaryawanExport($sheetsData, $periodLabel),
+            new \App\Exports\RekapAbsensiPerKaryawanExport($sheetsData, $periodLabel),   // ✅ huruf besar
             $filename,
             \Maatwebsite\Excel\Excel::XLS
         );
