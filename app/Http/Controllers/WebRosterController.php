@@ -6,6 +6,7 @@ use App\Models\JadwalRoster;
 use Illuminate\Http\Request;
 use App\Models\User;
 use App\Models\MasterShift;
+use App\Models\LiburNasional;
 use Carbon\Carbon;
 
 class WebRosterController extends Controller
@@ -64,7 +65,16 @@ class WebRosterController extends Controller
 
         $shifts = $shiftsQuery->get();
 
-        return view('roster', compact('stafGrouped', 'shifts', 'bulan', 'tahun', 'jumlahHari'));
+        $liburMap = LiburNasional::whereYear('tanggal', $tahun)
+            ->get()
+            ->mapWithKeys(fn($l) => [
+                $l->tanggal->format('Y-m-d') => [
+                    'nama'  => $l->nama,
+                    'jenis' => $l->jenis,   // 'nasional' atau 'cuti_bersama'
+                ]
+            ]);
+
+        return view('roster', compact('stafGrouped', 'shifts', 'bulan', 'tahun', 'jumlahHari', 'liburMap'));
     }
 
     public function bulkStore(Request $request)

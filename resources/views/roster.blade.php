@@ -113,11 +113,42 @@ $shiftMap[(string) $s->id] = [
                             class="sticky top-0 left-0 z-40 bg-slate-900 text-white px-6 py-4 text-left text-xs font-bold uppercase tracking-widest w-64 shadow-[4px_4px_15px_-3px_rgba(0,0,0,0.3)]">
                             Nama Pegawai
                         </th>
-                        @for($i = 1; $i <= $jumlahHari; $i++) <th
-                            data-date="{{ $tahun }}-{{ str_pad($bulan, 2, '0', STR_PAD_LEFT) }}-{{ str_pad($i, 2, '0', STR_PAD_LEFT) }}"
-                            class="col-head sticky top-0 z-30 bg-slate-800 hover:bg-slate-600 text-white px-2 py-4 text-center text-xs font-bold uppercase tracking-widest min-w-[86px] border-l border-slate-700/50 cursor-pointer transition-colors"
-                            title="Klik untuk isi penuh kolom tanggal {{ $i }}">
-                            {{ $i }}
+                        @for($i = 1; $i <= $jumlahHari; $i++) @php $dateStr=$tahun . '-' . str_pad($bulan, 2, '0' ,
+                            STR_PAD_LEFT) . '-' . str_pad($i, 2, '0' , STR_PAD_LEFT);
+                            $carbonTgl=\Carbon\Carbon::createFromDate($tahun, $bulan, $i); $libur=$liburMap[$dateStr] ??
+                            null; $isWeekend=$carbonTgl->isWeekend();
+
+                            // Prioritas warna: Libur Nasional > Cuti Bersama > Weekend > Hari Kerja
+                            if ($libur && $libur['jenis'] === 'nasional') {
+                            $headBg = 'bg-rose-600';
+                            $labelTxt = 'LIBUR';
+                            $labelCls = 'text-rose-100';
+                            $tooltip = '🔴 LIBUR NASIONAL: ' . $libur['nama'];
+                            } elseif ($libur && $libur['jenis'] === 'cuti_bersama') {
+                            $headBg = 'bg-purple-600';
+                            $labelTxt = 'CUTI';
+                            $labelCls = 'text-purple-100';
+                            $tooltip = '🟣 CUTI BERSAMA: ' . $libur['nama'];
+                            } elseif ($isWeekend) {
+                            $headBg = 'bg-amber-500';
+                            $labelTxt = $carbonTgl->isoWeekday() === 6 ? 'SAB' : 'MIN';
+                            $labelCls = 'text-amber-100';
+                            $tooltip = '🟠 Akhir pekan';
+                            } else {
+                            $headBg = 'bg-slate-800';
+                            $labelTxt = null;
+                            $labelCls = '';
+                            $tooltip = 'Hari kerja';
+                            }
+                            @endphp
+                            <th data-date="{{ $dateStr }}"
+                                class="col-head sticky top-0 z-30 {{ $headBg }} hover:brightness-125 text-white px-2 py-3 text-center text-xs font-bold uppercase tracking-widest min-w-[86px] border-l border-slate-700/50 cursor-pointer transition-all"
+                                title="{{ $tooltip }} — klik untuk isi penuh kolom {{ $i }}">
+                                {{ $i }}
+                                @if($labelTxt)
+                                <span class="block text-[8px] font-black {{ $labelCls }} mt-0.5 leading-tight">{{
+                                    $labelTxt }}</span>
+                                @endif
                             </th>
                             @endfor
                     </tr>
@@ -178,6 +209,17 @@ $shiftMap[(string) $s->id] = [
                     @endforelse
                 </tbody>
             </table>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-4 mb-3 text-[10px] font-bold text-slate-500">
+            <span class="flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded bg-slate-800"></span> Hari
+                Kerja</span>
+            <span class="flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded bg-amber-500"></span> Sabtu /
+                Minggu</span>
+            <span class="flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded bg-rose-600"></span> Libur
+                Nasional</span>
+            <span class="flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded bg-purple-600"></span> Cuti
+                Bersama</span>
         </div>
 
         <div class="mt-8 flex justify-end">
