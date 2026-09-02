@@ -211,9 +211,16 @@
                         <td class="px-5 py-4 text-sm font-semibold text-slate-600 whitespace-nowrap">{{
                             $log->durasi_kerja ?? '-' }}</td>
                         <td class="px-5 py-4 whitespace-nowrap">
-                            <span
-                                class="px-2.5 py-1 rounded-full text-[10px] font-bold
-                                    {{ $log->status_kehadiran == 'Tepat Waktu' ? 'bg-emerald-50 text-emerald-600' : ($log->status_kehadiran == 'Terlambat' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600') }}">
+                            @php
+                            $statusColor = match($log->status_kehadiran) {
+                            'Tepat Waktu' => 'bg-emerald-50 text-emerald-600',
+                            'Terlambat' => 'bg-rose-50 text-rose-600',
+                            'Luar Jadwal' => 'bg-amber-50 text-amber-600',
+                            'Tanpa Jadwal' => 'bg-slate-100 text-slate-500',
+                            default => 'bg-slate-50 text-slate-400',
+                            };
+                            @endphp
+                            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold {{ $statusColor }}">
                                 {{ $log->status_kehadiran }}
                             </span>
                         </td>

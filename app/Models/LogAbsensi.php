@@ -10,18 +10,20 @@ class LogAbsensi extends Model
     protected $table = 'log_absensis';
 
     protected $fillable = [
+        'user_id',
         'roster_id',
         'waktu_masuk',
         'waktu_pulang',
-        'menit_terlambat',
-        'foto_masuk',
-        'foto_pulang',
         'latitude_masuk',
         'longitude_masuk',
         'latitude_pulang',
         'longitude_pulang',
-        'ip_address_masuk',
-        'ip_address_pulang',
+        'foto_masuk',
+        'foto_pulang',
+        'jenis_absen',
+        'menit_terlambat',
+        'status_kehadiran',
+        'durasi_kerja',
     ];
 
     protected $casts = [

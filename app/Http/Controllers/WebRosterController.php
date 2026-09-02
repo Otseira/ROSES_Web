@@ -2,26 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Api\AbsensiController;
 use App\Models\JadwalRoster;
-use Illuminate\Http\Request;
-use App\Models\User;
+use App\Models\LogAbsensi;
 use App\Models\MasterShift;
-use App\Models\LiburNasional;
+use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
 
 class WebRosterController extends Controller
 {
-    /**
-     * Helper: daftar ID unit yang boleh dikelola oleh user login.
-     * null = akses global (lihat semua unit).
-     */
     private function allowedUnitIds(User $user): ?array
     {
         if ($user->hasGlobalAccess()) {
-            return null; // HRD / Direktur / Superadmin lihat semua
+            return null;
         }
-
-        // Hanya unit yang dicentang pada "Unit yang Dikelola"
         return $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
     }
 
@@ -46,8 +41,7 @@ class WebRosterController extends Controller
 
         $staf = $queryStaf
             ->with(['unitKerja', 'rosters' => function ($q) use ($tahun, $bulan) {
-                $q->whereYear('tanggal_dinas', $tahun)
-                    ->whereMonth('tanggal_dinas', $bulan);
+                $q->whereYear('tanggal_dinas', $tahun)->whereMonth('tanggal_dinas', $bulan);
             }])
             ->orderBy('name')
             ->get();
@@ -56,83 +50,97 @@ class WebRosterController extends Controller
             return $u->unitKerja ? $u->unitKerja->nama_unit : 'Tanpa Unit';
         })->sortKeys();
 
-        // ✅ HANYA shift milik unit yang dikelola (tanpa orWhereNull)
         $shiftsQuery = MasterShift::query()->orderBy('jam_masuk');
-
         if ($allowed !== null) {
             $shiftsQuery->whereIn('unit_kerja_id', $allowed);
         }
-
         $shifts = $shiftsQuery->get();
 
-        $liburMap = LiburNasional::whereYear('tanggal', $tahun)
+        $liburMap = \App\Models\LiburNasional::whereYear('tanggal', $tahun)
             ->get()
             ->mapWithKeys(fn($l) => [
-                $l->tanggal->format('Y-m-d') => [
-                    'nama'  => $l->nama,
-                    'jenis' => $l->jenis,   // 'nasional' atau 'cuti_bersama'
-                ]
+                $l->tanggal->format('Y-m-d') => ['nama' => $l->nama, 'jenis' => $l->jenis],
             ]);
 
         return view('roster', compact('stafGrouped', 'shifts', 'bulan', 'tahun', 'jumlahHari', 'liburMap'));
     }
 
+    /**
+     * ✅ SIMPAN ROSTER + validasi batas tgl 7 + AUTO-SYNC absensi.
+     */
     public function bulkStore(Request $request)
     {
         try {
             $rosterData = $request->input('roster');
 
             if (!$rosterData) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Tidak ada data jadwal yang dikirim.'
-                ]);
+                return response()->json(['success' => false, 'message' => 'Tidak ada data jadwal yang dikirim.']);
+            }
+
+            // ✅ BATAS WAKTU: roster bulan berjalan hanya s/d tanggal 7
+            $now = Carbon::now();
+            foreach ($rosterData as $dates) {
+                foreach ($dates as $tanggal => $shiftId) {
+                    $d = Carbon::parse($tanggal);
+                    if ($d->year === $now->year && $d->month === $now->month && $now->day > 7) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Batas waktu penyusunan roster bulan ini sudah lewat (maksimal tanggal 7). Hubungi HRD untuk penyesuaian.',
+                        ], 422);
+                    }
+                    break 2;
+                }
             }
 
             $userLogin = $request->user();
             $allowed   = $this->allowedUnitIds($userLogin);
 
-            // VALIDASI KEAMANAN: hanya staf di unit yang diizinkan yang boleh disimpan
             $validUserIds = User::whereIn('id', array_keys($rosterData))
-                ->when($allowed !== null, function ($q) use ($allowed) {
-                    $q->whereIn('unit_kerja_id', $allowed);
-                })
+                ->when($allowed !== null, fn($q) => $q->whereIn('unit_kerja_id', $allowed))
                 ->pluck('id')
                 ->toArray();
 
+            $countShift  = 0;
+            $countAbsen  = 0;
+
             foreach ($rosterData as $userId => $dates) {
-                if (!in_array($userId, $validUserIds)) {
-                    continue; // abaikan / bisa juga dijadikan error 403
-                }
+                if (!in_array($userId, $validUserIds)) continue;
 
                 foreach ($dates as $tanggal => $shiftId) {
                     if ($shiftId) {
-                        JadwalRoster::updateOrCreate(
+                        $roster = JadwalRoster::updateOrCreate(
                             ['user_id' => $userId, 'tanggal_dinas' => $tanggal],
                             ['shift_id' => $shiftId]
                         );
+                        $countShift++;
+
+                        // ✅ JADWAL DIBUAT / DIGANTI → absensi otomatis ikut jadwal TERBARU
+                        $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, $roster);
                     } else {
                         JadwalRoster::where('user_id', $userId)
                             ->where('tanggal_dinas', $tanggal)
                             ->delete();
+
+                        // ✅ JADWAL DIHAPUS → absensi kembali "Tanpa Jadwal"
+                        $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, null);
                     }
                 }
             }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Jadwal Roster berhasil disimpan dan dipublikasikan.'
+                'message' => "Jadwal disimpan ({$countShift} shift). {$countAbsen} absensi otomatis disesuaikan dengan jadwal terbaru.",
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Terjadi kesalahan sistem: ' . $e->getMessage()
+                'message' => 'Terjadi kesalahan sistem: ' . $e->getMessage(),
             ]);
         }
     }
 
     /**
-     * BARU: Menyalin seluruh jadwal bulan sebelumnya ke bulan aktif (1 klik).
+     * ✅ Salin bulan lalu — juga melakukan auto-sync absensi.
      */
     public function copyPrevious(Request $request)
     {
@@ -155,29 +163,58 @@ class WebRosterController extends Controller
             ->whereMonth('tanggal_dinas', $prev->month)
             ->whereHas('user', function ($q) use ($allowed) {
                 $q->where('role', '!=', 'superadmin');
-                if ($allowed !== null) {
-                    $q->whereIn('unit_kerja_id', $allowed);
-                }
+                if ($allowed !== null) $q->whereIn('unit_kerja_id', $allowed);
             })
             ->get();
 
         $count = 0;
         foreach ($prevRosters as $r) {
             $day = (int) Carbon::parse($r->tanggal_dinas)->day;
-            if ($day > $targetDays) continue; // contoh: tgl 31 tidak ada di bulan 30 hari
+            if ($day > $targetDays) continue;
 
             $tanggalBaru = sprintf('%04d-%02d-%02d', $tahun, $bulan, $day);
 
-            JadwalRoster::updateOrCreate(
+            $roster = JadwalRoster::updateOrCreate(
                 ['user_id' => $r->user_id, 'tanggal_dinas' => $tanggalBaru],
                 ['shift_id' => $r->shift_id]
             );
+
+            $this->sinkronkanAbsensi((int) $r->user_id, $tanggalBaru, $roster);
             $count++;
         }
 
         return response()->json([
             'success' => true,
-            'message' => "Berhasil menyalin {$count} jadwal dari periode sebelumnya."
+            'message' => "Berhasil menyalin {$count} jadwal dari periode sebelumnya.",
         ]);
+    }
+
+    /**
+     * ✅ AUTO-SYNC: hubungkan semua absensi pada tanggal tsb ke roster (atau lepaskan),
+     * lalu hitung ulang statusnya dengan jadwal TERBARU.
+     */
+    private function sinkronkanAbsensi(int $userId, string $tanggal, ?JadwalRoster $roster): int
+    {
+        $start = Carbon::parse($tanggal)->startOfDay();
+        $end   = Carbon::parse($tanggal)->endOfDay();
+
+        // Shift malam (overnight): jendela absen masuk s/d jam pulang besoknya
+        if ($roster && $roster->shift && $roster->shift->jam_pulang < $roster->shift->jam_masuk) {
+            $start = Carbon::parse($tanggal . ' ' . $roster->shift->jam_masuk)
+                ->subMinutes(AbsensiController::MASUK_CEPAT_MAKS_MENIT);
+            $end = Carbon::parse($tanggal)->addDay()->setTimeFromTimeString($roster->shift->jam_pulang);
+        }
+
+        $logs = LogAbsensi::where('user_id', $userId)
+            ->whereBetween('waktu_masuk', [$start, $end])
+            ->get();
+
+        foreach ($logs as $log) {
+            $log->roster_id = $roster?->id;
+            $log->save();
+            AbsensiController::recalculateStatus($log);
+        }
+
+        return $logs->count();
     }
 }

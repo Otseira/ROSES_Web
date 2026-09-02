@@ -220,11 +220,20 @@ class WebLaporanController extends Controller
         $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
         $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
 
-        $logs = LogAbsensi::with(['roster.user.unitKerja'])
+        $logs = LogAbsensi::with(['user.unitKerja', 'roster.user.unitKerja', 'roster.shift'])
             ->whereBetween('waktu_masuk', [$startDate, $endDate])
-            ->when($unit, fn($q) => $q->whereHas('roster.user', fn($u) => $u->where('unit_kerja_id', $unit)))
+            ->when($unit, function ($q) use ($unit) {
+                // Cek via roster ATAU langsung user (untuk absensi tanpa roster)
+                $q->where(function ($q2) use ($unit) {
+                    $q2->whereHas('roster.user', fn($u) => $u->where('unit_kerja_id', $unit))
+                        ->orWhereHas('user', fn($u) => $u->where('unit_kerja_id', $unit));
+                });
+            })
             ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {
-                $q->whereHas('roster.user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+                $q->where(function ($q2) use ($allowedUnitIds) {
+                    $q2->whereHas('roster.user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds))
+                        ->orWhereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+                });
             })
             ->orderBy('waktu_masuk')
             ->get()
@@ -237,9 +246,10 @@ class WebLaporanController extends Controller
                     : null;
                 $log->jarak = $log->jarak_masuk ?? $log->jarak_pulang;
 
-                $log->status_kehadiran = $log->jenis_absen === 'luar_jadwal'
-                    ? 'Luar Jadwal'
-                    : ((($log->menit_terlambat ?? 0) > 0) ? 'Terlambat' : 'Tepat Waktu');
+                // Status sudah dihitung saat absen / saat roster di-link
+                if (!$log->status_kehadiran) {
+                    $log->status_kehadiran = 'Tanpa Jadwal';
+                }
 
                 if ($log->waktu_masuk && $log->waktu_pulang) {
                     $m = $log->waktu_masuk->diffInMinutes($log->waktu_pulang);
