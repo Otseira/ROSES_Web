@@ -8,6 +8,8 @@ use App\Models\MasterUnitKerja;
 use App\Models\PengaturanAplikasi;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Exports\RekapAbsensiPerKaryawanExport;
 
 class WebLaporanController extends Controller
 {
@@ -93,64 +95,66 @@ class WebLaporanController extends Controller
         $periodLabel = Carbon::parse($startDate)->translatedFormat('d M Y')
             . ' s/d ' . Carbon::parse($endDate)->translatedFormat('d M Y');
 
-        $rows   = [];
-        $rows[] = ['REKAP ABSENSI & LEMBUR - ' . strtoupper($periodLabel)];
-        $rows[] = [];
-        $rows[] = [
-            'Nama',
-            'Unit Kerja',
-            'Tanggal',
-            'Jam Masuk',
-            'Jam Keluar',
-            'Durasi Kerja',
-            'Status',
-            'Terlambat (menit)',
-            'Jarak ke Pusat (m)',
-            'Lembur (Menit)',
-            'On-Call (Menit)',
-        ];
+        // ===== ✅ KELOMPOKKAN ABSENSI PER KARYAWAN (Untuk Multi-Sheet) =====
+        $grouped = $logs->groupBy(function ($log) {
+            $user = $log->user ?? $log->roster?->user;
+            return $user?->id ?? ('log-' . $log->id);
+        });
 
-        foreach ($logs as $log) {
-            $nama  = $log->user?->name ?? $log->roster?->user?->name ?? '-';
-            $key   = ($log->user_id ?? $log->roster?->user_id) . '|' . optional($log->waktu_masuk)->toDateString();
-            $items = $lemburs->get($key);
+        $sheetsData = [];
+        foreach ($grouped as $userId => $groupLogs) {
+            $first = $groupLogs->first();
+            $user  = $first->user ?? $first->roster?->user;
 
-            $mLembur = 0;
-            $mOncall = 0;
-            if ($items) {
-                foreach ($items as $l) {
-                    $mnt  = (float) ($l->total_jam_lembur ?? 0) * 60;
-                    $norm = str_contains(strtolower(str_replace(['-', ' ', '_'], '', $l->jenis_lembur ?? '')), 'oncall');
-                    $norm ? $mOncall += $mnt : $mLembur += $mnt;
+            $rows = [];
+            foreach ($groupLogs as $log) {
+                $key   = ($log->user_id ?? $log->roster?->user_id) . '|' . optional($log->waktu_masuk)->toDateString();
+                $items = $lemburs->get($key);
+
+                $mLembur = 0;
+                $mOncall = 0;
+                if ($items) {
+                    foreach ($items as $l) {
+                        $mnt  = (float) ($l->total_jam_lembur ?? 0) * 60;
+                        $norm = str_contains(strtolower(str_replace(['-', ' ', '_'], '', $l->jenis_lembur ?? '')), 'oncall');
+                        $norm ? $mOncall += $mnt : $mLembur += $mnt;
+                    }
                 }
+
+                $rows[] = [
+                    optional($log->waktu_masuk)->format('d/m/Y') ?? '-',
+                    optional($log->waktu_masuk)->format('H:i') ?? '-',
+                    optional($log->waktu_pulang)->format('H:i') ?? '-',
+                    $log->durasi_kerja ?? '-',
+                    $log->status_kehadiran,
+                    (int) ($log->menit_terlambat ?? 0),
+                    $log->jarak ?? '-',
+                    (int) round($mLembur),
+                    (int) round($mOncall),
+                ];
             }
 
-            $rows[] = [
-                $nama,
-                $log->user?->unitKerja?->nama_unit ?? $log->roster?->user?->unitKerja?->nama_unit ?? '-',
-                optional($log->waktu_masuk)->format('d/m/Y') ?? '-',
-                optional($log->waktu_masuk)->format('H:i') ?? '-',
-                optional($log->waktu_pulang)->format('H:i') ?? '-',
-                $log->durasi_kerja ?? '-',
-                $log->status_kehadiran,
-                $log->menit_terlambat ?? 0,
-                $log->jarak ?? '-',
-                (int) round($mLembur),
-                (int) round($mOncall),
+            $sheetsData[] = [
+                'nama' => $user?->name ?? 'Tanpa Nama',
+                'unit' => $user?->unitKerja?->nama_unit ?? '-',
+                'rows' => $rows,
             ];
         }
 
-        $csv = "\xEF\xBB\xBF";
-        foreach ($rows as $row) {
-            $csv .= implode(';', array_map(fn($c) => '"' . str_replace('"', '""', (string) $c) . '"', $row)) . "\n";
-        }
+        // Urutkan sheet sesuai abjad nama
+        usort($sheetsData, fn($a, $b) => strcasecmp($a['nama'], $b['nama']));
 
-        $filename = 'rekap-absensi-' . Carbon::parse($startDate)->format('Y-m-d') . '-' . Carbon::parse($endDate)->format('Y-m-d') . '.csv';
+        // ✅ EKSTENSI .xls (bukan .xlsx)
+        $filename = 'rekap-absensi-'
+            . Carbon::parse($startDate)->format('Y-m-d') . '-'
+            . Carbon::parse($endDate)->format('Y-m-d') . '.xls';
 
-        return response($csv, 200, [
-            'Content-Type'        => 'text/csv; charset=UTF-8',
-            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
-        ]);
+        // ✅ WRITER Xls (BIFF8) — TIDAK butuh extension zip
+        return Excel::download(
+            new \app\Exports\RekapAbsensiPerKaryawanExport($sheetsData, $periodLabel),
+            $filename,
+            \Maatwebsite\Excel\Excel::XLS
+        );
     }
 
     public function exportPdf(Request $request)
