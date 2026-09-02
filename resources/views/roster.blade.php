@@ -102,6 +102,36 @@ $shiftMap[(string) $s->id] = [
         class="hidden mb-3 px-4 py-3 rounded-xl bg-sky-50 border border-sky-200 text-xs font-semibold text-sky-800">
     </div>
 
+    {{-- ===== ✅ TOOLBAR NAVIGASI SIMPLE ===== --}}
+    <div class="mb-4 flex flex-col gap-3">
+
+        {{-- Tab per Unit --}}
+        <div class="flex flex-wrap items-center gap-2" id="unitTabs">
+            <span class="text-xs font-extrabold uppercase tracking-widest text-slate-500 mr-1">Unit:</span>
+            <button type="button" data-unit="all"
+                class="unit-tab px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 bg-slate-800 text-white">
+                Semua Unit
+            </button>
+            @foreach($stafGrouped as $namaUnit => $groupStaf)
+            <button type="button" data-unit="{{ $namaUnit }}"
+                class="unit-tab px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 bg-white text-slate-600 hover:bg-slate-100">
+                {{ $namaUnit }} <span class="opacity-60">({{ $groupStaf->count() }})</span>
+            </button>
+            @endforeach
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+            {{-- Cari nama pegawai --}}
+            <input type="text" id="cariPegawai" placeholder="🔍 Cari nama pegawai..."
+                class="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-accent/30 w-64">
+
+            {{-- Navigasi per minggu --}}
+            <div class="flex flex-wrap items-center gap-1" id="weekNav">
+                <span class="text-xs font-extrabold uppercase tracking-widest text-slate-500 mr-1">Tanggal:</span>
+            </div>
+        </div>
+    </div>
+
     {{-- ===== MATRIKS ROSTER ===== --}}
     <form action="{{ url('/roster/bulk-store') }}" method="POST" id="rosterForm">
         @csrf
@@ -141,7 +171,7 @@ $shiftMap[(string) $s->id] = [
                             $tooltip = 'Hari kerja';
                             }
                             @endphp
-                            <th data-date="{{ $dateStr }}"
+                            <th data-date="{{ $dateStr }}" data-day="{{ $i }}"
                                 class="col-head sticky top-0 z-30 {{ $headBg }} hover:brightness-125 text-white px-2 py-3 text-center text-xs font-bold uppercase tracking-widest min-w-[86px] border-l border-slate-700/50 cursor-pointer transition-all"
                                 title="{{ $tooltip }} — klik untuk isi penuh kolom {{ $i }}">
                                 {{ $i }}
@@ -156,7 +186,7 @@ $shiftMap[(string) $s->id] = [
                 <tbody class="bg-white">
                     @forelse($stafGrouped as $namaUnit => $groupStaf)
                     {{-- ===== Baris Header Kelompok Unit ===== --}}
-                    <tr>
+                    <tr class="unit-head" data-unit="{{ $namaUnit }}">
                         <td colspan="{{ $jumlahHari + 1 }}"
                             class="bg-slate-800 text-white px-6 py-2.5 text-xs font-extrabold uppercase tracking-widest border-y border-slate-700">
                             {{ $namaUnit }}
@@ -168,7 +198,7 @@ $shiftMap[(string) $s->id] = [
 
                     {{-- ===== Baris Staf dalam Unit Tersebut ===== --}}
                     @foreach($groupStaf as $pegawai)
-                    <tr>
+                    <tr class="staff-row" data-unit="{{ $namaUnit }}" data-name="{{ mb_strtolower($pegawai->name) }}">
                         <td data-user="{{ $pegawai->id }}"
                             class="row-head sticky left-0 z-20 bg-white hover:bg-slate-100 px-6 py-2 whitespace-nowrap text-sm font-extrabold text-slate-800 border-b border-r border-slate-100 shadow-[4px_0_15px_-3px_rgba(0,0,0,0.05)] cursor-pointer transition-colors"
                             title="Klik untuk isi penuh baris {{ $pegawai->name }}">
@@ -180,7 +210,7 @@ $shiftMap[(string) $s->id] = [
                             rosters->firstWhere('tanggal_dinas', $tanggalSekarang);
                             $nilaiAwal = $rosterHariIni ? $rosterHariIni->shift_id : '';
                             @endphp
-                            <td class="p-0 border-b border-l border-slate-100">
+                            <td class="p-0 border-b border-l border-slate-100" data-day="{{ $i }}">
                                 <input type="hidden" name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}]"
                                     value="{{ $nilaiAwal }}">
                                 <div class="roster-cell h-11 flex items-center justify-center text-[10px] font-extrabold cursor-pointer select-none {{ $nilaiAwal ? ($shiftStyle[$nilaiAwal] ?? 'bg-slate-100 text-slate-600') : 'bg-slate-100 text-slate-400' }}"
@@ -188,7 +218,8 @@ $shiftMap[(string) $s->id] = [
                                     data-date="{{ $tanggalSekarang }}"
                                     title="{{ $pegawai->name }} — {{ $tanggalSekarang }}">
                                     {{ $nilaiAwal ?
-                                    \Illuminate\Support\Str::limit(optional($rosterHariIni->shift)->nama_shift, 10) :
+                                    \Illuminate\Support\Str::limit(optional($rosterHariIni->shift)->nama_shift, 10)
+                                    :
                                     '—' }}
                                 </div>
                             </td>
@@ -202,7 +233,8 @@ $shiftMap[(string) $s->id] = [
                         <td colspan="{{ $jumlahHari + 1 }}"
                             class="px-6 py-10 text-center text-sm font-bold text-slate-400">
                             Tidak ada unit yang Anda kelola.<br>
-                            <span class="text-xs font-medium">Silakan centang "Unit yang Dikelola" pada menu Hak Akses
+                            <span class="text-xs font-medium">Silakan centang "Unit yang Dikelola" pada menu Hak
+                                Akses
                                 terlebih dahulu.</span>
                         </td>
                     </tr>
@@ -232,7 +264,7 @@ $shiftMap[(string) $s->id] = [
 </div>
 
 {{-- Penampung data untuk JavaScript (semua output Blade dipindah ke sini) --}}
-<div id="roster-data" class="hidden" data-bulan="{{ $bulan }}" data-tahun="{{ $tahun }}"
+<div id="roster-data" class="hidden" data-bulan="{{ $bulan }}" data-tahun="{{ $tahun }}" data-days="{{ $jumlahHari }}"
     data-copy-url="{{ url('/roster/copy-previous') }}" data-shift-map='@json($shiftMap)'></div>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -245,11 +277,11 @@ $shiftMap[(string) $s->id] = [
         const BULAN = parseInt(dataEl.dataset.bulan, 10);
         const TAHUN = parseInt(dataEl.dataset.tahun, 10);
         const COPY_URL = dataEl.dataset.copyUrl;
+        const TOTAL_DAYS = parseInt(dataEl.dataset.days || '31', 10);
 
         let activeShift = '';
         let painting = false;
 
-        // ✅ FIX: Deklarasi chips SEBELUM dipakai
         const chips = document.querySelectorAll('.shift-chip');
         const infoBox = document.getElementById('shift-info');
 
@@ -273,14 +305,12 @@ $shiftMap[(string) $s->id] = [
             }
         }
 
-        // ---------- Event listener untuk setiap chip ----------
         chips.forEach(function (chip) {
             chip.addEventListener('click', function () {
                 setActiveShift(chip.dataset.shift);
             });
         });
 
-        // Set chip pertama sebagai aktif (jika ada)
         if (chips.length > 0) {
             setActiveShift(chips[0].dataset.shift);
         } else {
@@ -427,6 +457,102 @@ $shiftMap[(string) $s->id] = [
                 }
             });
         }
+
+        // ==========================================================
+        // ✅ LOGIKA NAVIGASI SIMPLE (Tab Unit, Cari Nama, Per Minggu)
+        // ==========================================================
+        const unitTabs = document.querySelectorAll('.unit-tab');
+        const unitHeads = document.querySelectorAll('tr.unit-head');
+        const staffRows = document.querySelectorAll('tr.staff-row');
+        const dayEls = document.querySelectorAll('[data-day]'); // th dan td
+        const weekNav = document.getElementById('weekNav');
+        const searchBox = document.getElementById('cariPegawai');
+
+        let activeUnit = 'all';
+        let activeWeek = 'all';
+        let query = '';
+
+        // 1. Generate tombol minggu (1-7, 8-14, dst) secara otomatis
+        (function buildWeeks() {
+            const mk = (val, label) => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.dataset.week = val;
+                b.textContent = label;
+                b.className = 'week-btn px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 ' +
+                    (val === 'all' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-100');
+                return b;
+            };
+            weekNav.appendChild(mk('all', 'Semua'));
+            for (let s = 1; s <= TOTAL_DAYS; s += 7) {
+                const e = Math.min(s + 6, TOTAL_DAYS);
+                weekNav.appendChild(mk(s + '-' + e, s + '–' + e));
+            }
+        })();
+
+        // 2. Fungsi untuk filter tampilan baris dan kolom
+        function applyViewFilters() {
+            // Filter Baris (Unit Head & Staff Row)
+            unitHeads.forEach(function (tr) {
+                const unitMatch = (activeUnit === 'all' || tr.dataset.unit === activeUnit);
+                // Jika sedang mencari nama, sembunyikan header unit agar fokus ke hasil pencarian
+                if (query) {
+                    tr.style.display = 'none';
+                } else {
+                    tr.style.display = unitMatch ? '' : 'none';
+                }
+            });
+
+            staffRows.forEach(function (tr) {
+                const okUnit = (activeUnit === 'all' || tr.dataset.unit === activeUnit);
+                const okName = !query || (tr.dataset.name || '').includes(query);
+                tr.style.display = (okUnit && okName) ? '' : 'none';
+            });
+
+            // Filter Kolom (Header Tanggal & Sel Tanggal)
+            let lo = 1, hi = TOTAL_DAYS;
+            if (activeWeek !== 'all') {
+                const p = activeWeek.split('-');
+                lo = parseInt(p[0], 10);
+                hi = parseInt(p[1], 10);
+            }
+
+            dayEls.forEach(function (el) {
+                const d = parseInt(el.dataset.day, 10);
+                el.style.display = (activeWeek === 'all' || (d >= lo && d <= hi)) ? '' : 'none';
+            });
+        }
+
+        // 3. Event Listeners untuk Navigasi
+        unitTabs.forEach(function (b) {
+            b.addEventListener('click', function () {
+                activeUnit = b.dataset.unit;
+                unitTabs.forEach(function (x) {
+                    x.className = 'unit-tab px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 ' +
+                        (x.dataset.unit === activeUnit ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-100');
+                });
+                applyViewFilters();
+            });
+        });
+
+        weekNav.addEventListener('click', function (e) {
+            const b = e.target.closest('.week-btn');
+            if (!b) return;
+            activeWeek = b.dataset.week;
+            weekNav.querySelectorAll('.week-btn').forEach(function (x) {
+                x.className = 'week-btn px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 ' +
+                    (x.dataset.week === activeWeek ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-100');
+            });
+            applyViewFilters();
+        });
+
+        if (searchBox) {
+            searchBox.addEventListener('input', function () {
+                query = searchBox.value.trim().toLowerCase();
+                applyViewFilters();
+            });
+        }
+
     });
 </script>
 @endsection
