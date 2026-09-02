@@ -223,7 +223,6 @@ class WebLaporanController extends Controller
         $logs = LogAbsensi::with(['user.unitKerja', 'roster.user.unitKerja', 'roster.shift'])
             ->whereBetween('waktu_masuk', [$startDate, $endDate])
             ->when($unit, function ($q) use ($unit) {
-                // Cek via roster ATAU langsung user (untuk absensi tanpa roster)
                 $q->where(function ($q2) use ($unit) {
                     $q2->whereHas('roster.user', fn($u) => $u->where('unit_kerja_id', $unit))
                         ->orWhereHas('user', fn($u) => $u->where('unit_kerja_id', $unit));
@@ -238,6 +237,7 @@ class WebLaporanController extends Controller
             ->orderBy('waktu_masuk')
             ->get()
             ->map(function ($log) use ($lat, $lng) {
+                // Hitung jarak
                 $log->jarak_masuk = is_numeric($log->latitude_masuk)
                     ? round($this->haversine($lat, $lng, (float) $log->latitude_masuk, (float) $log->longitude_masuk))
                     : null;
@@ -246,11 +246,10 @@ class WebLaporanController extends Controller
                     : null;
                 $log->jarak = $log->jarak_masuk ?? $log->jarak_pulang;
 
-                // Status sudah dihitung saat absen / saat roster di-link
-                if (!$log->status_kehadiran) {
-                    $log->status_kehadiran = 'Tanpa Jadwal';
-                }
+                // ✅ HITUNG ULANG STATUS berdasarkan roster (real-time)
+                $this->recalculateStatusForReport($log);
 
+                // Hitung durasi kerja
                 if ($log->waktu_masuk && $log->waktu_pulang) {
                     $m = $log->waktu_masuk->diffInMinutes($log->waktu_pulang);
                     $log->durasi_kerja = intdiv($m, 60) . 'j ' . ($m % 60) . 'm';
@@ -272,6 +271,43 @@ class WebLaporanController extends Controller
             ->groupBy(fn($l) => $l->user_id . '|' . $l->waktu_mulai_lembur->toDateString());
 
         return [$logs, $lemburs];
+    }
+
+    /**
+     * ✅ Hitung ulang status untuk laporan (real-time, tidak mengubah database).
+     * Jika ada roster → hitung keterlambatan berdasarkan shift.
+     * Jika tidak ada roster → "Tanpa Jadwal" atau "Luar Jadwal".
+     */
+    private function recalculateStatusForReport($log): void
+    {
+        $roster = $log->roster;
+
+        // Tanpa roster → Tanpa Jadwal atau Luar Jadwal
+        if (!$roster || !$roster->shift || !$log->waktu_masuk) {
+            $log->status_kehadiran = ($log->jenis_absen === 'luar_jadwal')
+                ? 'Luar Jadwal'
+                : 'Tanpa Jadwal';
+            $log->menit_terlambat = 0;
+            return;
+        }
+
+        // Ada roster → hitung keterlambatan
+        $shift = $roster->shift;
+        $expected = \Carbon\Carbon::parse($roster->tanggal_dinas . ' ' . $shift->jam_masuk);
+
+        // Shift malam (overnight): jika absen pagi tapi shift dimulai kemarin malam
+        if ($shift->jam_pulang < $shift->jam_masuk && $log->waktu_masuk->hour < 12) {
+            $expected->subDay();
+        }
+
+        $selisih = $expected->diffInMinutes($log->waktu_masuk, false); // positif = terlambat
+        $toleransi = (int) ($shift->toleransi_terlambat_menit ?? 5);
+
+        $log->menit_terlambat = ($selisih > $toleransi) ? (int) $selisih : 0;
+
+        $log->status_kehadiran = ($log->jenis_absen === 'luar_jadwal')
+            ? 'Luar Jadwal'
+            : ($log->menit_terlambat > 0 ? 'Terlambat' : 'Tepat Waktu');
     }
 
     private function haversine($lat1, $lon1, $lat2, $lon2): float
