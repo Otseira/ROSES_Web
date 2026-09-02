@@ -213,14 +213,14 @@ $shiftMap[(string) $s->id] = [
                             <td class="p-0 border-b border-l border-slate-100" data-day="{{ $i }}">
                                 <input type="hidden" name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}]"
                                     value="{{ $nilaiAwal }}">
-                                <div class="roster-cell h-11 flex items-center justify-center text-[10px] font-extrabold cursor-pointer select-none {{ $nilaiAwal ? ($shiftStyle[$nilaiAwal] ?? 'bg-slate-100 text-slate-600') : 'bg-slate-100 text-slate-400' }}"
+                                <div class="roster-cell h-11 flex items-center justify-center text-[9px] font-extrabold cursor-pointer select-none {{ $nilaiAwal ? ($shiftStyle[$nilaiAwal] ?? 'bg-slate-100 text-slate-600') : 'bg-slate-100 text-slate-400' }}"
                                     data-shift="{{ $nilaiAwal }}" data-user="{{ $pegawai->id }}"
                                     data-date="{{ $tanggalSekarang }}"
-                                    title="{{ $pegawai->name }} — {{ $tanggalSekarang }}">
-                                    {{ $nilaiAwal ?
-                                    \Illuminate\Support\Str::limit(optional($rosterHariIni->shift)->nama_shift, 10)
-                                    :
-                                    '—' }}
+                                    title="{{ $pegawai->name }} — {{ $tanggalSekarang }}{{ $rosterHariIni && $rosterHariIni->shift ? ' • ' . $rosterHariIni->shift->nama_shift : '' }}">
+                                    {{ $nilaiAwal && $rosterHariIni && $rosterHariIni->shift
+                                    ? substr((string) $rosterHariIni->shift->jam_masuk, 0, 5) . '–' . substr((string)
+                                    $rosterHariIni->shift->jam_pulang, 0, 5)
+                                    : '—' }}
                                 </div>
                             </td>
                             @endfor
@@ -328,7 +328,7 @@ $shiftMap[(string) $s->id] = [
             info.cls.split(' ').forEach(function (c) { cell.classList.add(c); });
 
             cell.dataset.shift = key;
-            cell.textContent = key === '' ? '—' : info.label;
+            cell.textContent = key === '' ? '—' : (info.jam || info.label);
 
             const input = cell.parentElement.querySelector('input[type="hidden"]');
             if (input) input.value = key;
