@@ -286,8 +286,7 @@ class WebLaporanController extends Controller
     {
         $roster = $log->roster;
 
-        // Tanpa roster → Tanpa Jadwal atau Luar Jadwal
-        if (!$roster || !$roster->shift || !$log->waktu_masuk) {
+        if (!$roster || !$log->waktu_masuk) {
             $log->status_kehadiran = ($log->jenis_absen === 'luar_jadwal')
                 ? 'Luar Jadwal'
                 : 'Tanpa Jadwal';
@@ -295,17 +294,25 @@ class WebLaporanController extends Controller
             return;
         }
 
-        // Ada roster → hitung keterlambatan
-        $shift = $roster->shift;
-        $expected = \Carbon\Carbon::parse($roster->tanggal_dinas . ' ' . $shift->jam_masuk);
+        // ✅ Ambil jam dari custom atau shift
+        $jamMasuk = $roster->custom_jam_masuk ?? ($roster->shift ? (string) $roster->shift->jam_masuk : null);
+        $toleransi = $roster->shift ? (int) ($roster->shift->toleransi_terlambat_menit ?? 5) : 5;
 
-        // Shift malam (overnight): jika absen pagi tapi shift dimulai kemarin malam
-        if ($shift->jam_pulang < $shift->jam_masuk && $log->waktu_masuk->hour < 12) {
+        if (!$jamMasuk) {
+            $log->status_kehadiran = 'Tanpa Jadwal';
+            $log->menit_terlambat = 0;
+            return;
+        }
+
+        $expected = \Carbon\Carbon::parse($roster->tanggal_dinas . ' ' . $jamMasuk);
+
+        // Shift malam (overnight)
+        $jamPulang = $roster->custom_jam_pulang ?? ($roster->shift ? (string) $roster->shift->jam_pulang : null);
+        if ($jamPulang && $jamMasuk && $jamPulang < $jamMasuk && $log->waktu_masuk->hour < 12) {
             $expected->subDay();
         }
 
-        $selisih = $expected->diffInMinutes($log->waktu_masuk, false); // positif = terlambat
-        $toleransi = (int) ($shift->toleransi_terlambat_menit ?? 5);
+        $selisih = $expected->diffInMinutes($log->waktu_masuk, false);
 
         $log->menit_terlambat = ($selisih > $toleransi) ? (int) $selisih : 0;
 

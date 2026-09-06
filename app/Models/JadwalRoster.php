@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class JadwalRoster extends Model
 {
@@ -12,28 +11,56 @@ class JadwalRoster extends Model
 
     protected $fillable = [
         'user_id',
-        'shift_id',
         'tanggal_dinas',
+        'shift_id',
+        'custom_jam_masuk',
+        'custom_jam_pulang',
+        'custom_nama_shift',
     ];
 
-    // Relasi: Jadwal ini milik pegawai tertentu
-    public function shift(): BelongsTo
-    {
-        return $this->belongsTo(MasterShift::class, 'shift_id');
-    }
+    protected $casts = [
+        'tanggal_dinas' => 'date',
+    ];
 
     public function user(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'user_id');
+        return $this->belongsTo(User::class);
     }
 
-    public function unitKerja(): BelongsTo
+    public function shift(): BelongsTo
     {
-        return $this->belongsTo(MasterUnitKerja::class, 'unit_kerja_id');
+        return $this->belongsTo(MasterShift::class);
     }
-    // Relasi: Satu slot jadwal dinas harian menghasilkan maksimal satu rekaman log absensi
-    public function logAbsensi(): HasOne
+
+    /**
+     * Ambil jam masuk:优先 custom, fallback ke shift.
+     */
+    public function getJamMasukAttribute(): ?string
     {
-        return $this->hasOne(LogAbsensi::class, 'roster_id');
+        return $this->custom_jam_masuk ?? ($this->shift ? (string) $this->shift->jam_masuk : null);
+    }
+
+    /**
+     * Ambil jam pulang:优先 custom, fallback ke shift.
+     */
+    public function getJamPulangAttribute(): ?string
+    {
+        return $this->custom_jam_pulang ?? ($this->shift ? (string) $this->shift->jam_pulang : null);
+    }
+
+    /**
+     * Ambil nama shift:优先 custom, fallback ke shift.
+     */
+    public function getNamaShiftAttribute(): ?string
+    {
+        return $this->custom_nama_shift ?? ($this->shift ? $this->shift->nama_shift : null);
+    }
+
+    /**
+     * Apakah ini shift custom?
+     */
+    public function isCustom(): bool
+    {
+        return $this->custom_jam_masuk !== null;
     }
 }

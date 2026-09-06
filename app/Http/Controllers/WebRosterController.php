@@ -80,7 +80,7 @@ class WebRosterController extends Controller
             // ✅ BATAS WAKTU: roster bulan berjalan hanya s/d tanggal 7
             $now = Carbon::now();
             foreach ($rosterData as $dates) {
-                foreach ($dates as $tanggal => $shiftId) {
+                foreach ($dates as $tanggal => $data) {
                     $d = Carbon::parse($tanggal);
                     if ($d->year === $now->year && $d->month === $now->month && $now->day > 7) {
                         return response()->json([
@@ -106,24 +106,40 @@ class WebRosterController extends Controller
             foreach ($rosterData as $userId => $dates) {
                 if (!in_array($userId, $validUserIds)) continue;
 
-                foreach ($dates as $tanggal => $shiftId) {
-                    if ($shiftId) {
-                        $roster = JadwalRoster::updateOrCreate(
-                            ['user_id' => $userId, 'tanggal_dinas' => $tanggal],
-                            ['shift_id' => $shiftId]
-                        );
-                        $countShift++;
+                foreach ($dates as $tanggal => $data) {
+                    // Handle both old format (simple shift_id) and new format (array with custom)
+                    $shiftId = is_array($data) ? ($data['shift_id'] ?? null) : $data;
+                    $customMasuk = is_array($data) ? ($data['custom_jam_masuk'] ?? null) : null;
+                    $customPulang = is_array($data) ? ($data['custom_jam_pulang'] ?? null) : null;
+                    $customNama = is_array($data) ? ($data['custom_nama_shift'] ?? null) : null;
 
-                        // ✅ JADWAL DIBUAT / DIGANTI → absensi otomatis ikut jadwal TERBARU
-                        $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, $roster);
-                    } else {
+                    // Jika semua kosong → hapus roster
+                    if (empty($shiftId) && empty($customMasuk)) {
                         JadwalRoster::where('user_id', $userId)
                             ->where('tanggal_dinas', $tanggal)
                             ->delete();
 
-                        // ✅ JADWAL DIHAPUS → absensi kembali "Tanpa Jadwal"
                         $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, null);
+                        continue;
                     }
+
+                    // Jika ada custom → shift_id = null (custom override)
+                    if (!empty($customMasuk)) {
+                        $shiftId = null;
+                    }
+
+                    $roster = JadwalRoster::updateOrCreate(
+                        ['user_id' => $userId, 'tanggal_dinas' => $tanggal],
+                        [
+                            'shift_id' => $shiftId,
+                            'custom_jam_masuk' => $customMasuk,
+                            'custom_jam_pulang' => $customPulang,
+                            'custom_nama_shift' => $customNama,
+                        ]
+                    );
+                    $countShift++;
+
+                    $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, $roster);
                 }
             }
 
@@ -199,10 +215,15 @@ class WebRosterController extends Controller
         $end   = Carbon::parse($tanggal)->endOfDay();
 
         // Shift malam (overnight): jendela absen masuk s/d jam pulang besoknya
-        if ($roster && $roster->shift && $roster->shift->jam_pulang < $roster->shift->jam_masuk) {
-            $start = Carbon::parse($tanggal . ' ' . $roster->shift->jam_masuk)
-                ->subMinutes(AbsensiController::MASUK_CEPAT_MAKS_MENIT);
-            $end = Carbon::parse($tanggal)->addDay()->setTimeFromTimeString($roster->shift->jam_pulang);
+        if ($roster) {
+            $jamMasuk = $roster->custom_jam_masuk ?? ($roster->shift ? (string) $roster->shift->jam_masuk : null);
+            $jamPulang = $roster->custom_jam_pulang ?? ($roster->shift ? (string) $roster->shift->jam_pulang : null);
+
+            if ($jamMasuk && $jamPulang && $jamPulang < $jamMasuk) {
+                $start = Carbon::parse($tanggal . ' ' . $jamMasuk)
+                    ->subMinutes(AbsensiController::MASUK_CEPAT_MAKS_MENIT);
+                $end = Carbon::parse($tanggal)->addDay()->setTimeFromTimeString($jamPulang);
+            }
         }
 
         $logs = LogAbsensi::where('user_id', $userId)

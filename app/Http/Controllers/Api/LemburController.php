@@ -75,19 +75,26 @@ class LemburController extends Controller
         $waktuMulai   = $now->copy()->subMinutes($durasiMenit);
         $totalJam     = round($durasiMenit / 60, 2);
 
-        $logAbsen = LogAbsensi::where('roster_id', $roster->id)->first();
-        $autoClockOut = false;
-        if ($logAbsen && $logAbsen->waktu_pulang === null) {
-            $logAbsen->waktu_pulang = $now;
-            $logAbsen->save();
-            $autoClockOut = true;
-        }
-
+        // Geofencing DULUAN (sebelum menyimpan foto)
         $cekRadius = $this->verifikasiRadius($request);
         if ($cekRadius !== true) return $cekRadius;
 
+        // Simpan foto lembur
         $file = $request->file('foto_masuk');
         $path = $file->storeAs('lembur_masuk', 'lembur_' . ($user->nik ?? $user->id) . '_' . time() . '.' . $file->extension(), 'public');
+
+        // ✅ AUTO CLOCK-OUT: akhiri jam dinas + copy foto lembur sebagai foto pulang
+        $logAbsen = LogAbsensi::where('roster_id', $roster->id)->first();
+        $autoClockOut = false;
+        if ($logAbsen && $logAbsen->waktu_pulang === null) {
+            $logAbsen->waktu_pulang      = $now;
+            $logAbsen->foto_pulang       = $path; // ✅ FOTO LEMBUR → FOTO PULANG
+            $logAbsen->latitude_pulang   = $request->latitude;
+            $logAbsen->longitude_pulang  = $request->longitude;
+            $logAbsen->ip_address_pulang = $request->ip();
+            $logAbsen->save();
+            $autoClockOut = true;
+        }
 
         LogLembur::create([
             'user_id'              => $user->id,

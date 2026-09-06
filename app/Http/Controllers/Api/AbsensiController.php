@@ -14,7 +14,7 @@ class AbsensiController extends Controller
     public const MASUK_CEPAT_MAKS_MENIT = 120;
 
     /**
-     * ✅ ABSEN MASUK — selalu bisa, dengan atau tanpa jadwal dinas.
+     * ✅ ABSEN MASUK — wajib dalam radius (dinamis dari Pengaturan Sistem).
      */
     public function clockIn(Request $request)
     {
@@ -41,35 +41,24 @@ class AbsensiController extends Controller
             ], 422);
         }
 
+        // ✅ CEK RADIUS (selalu membaca nilai TERBARU dari Pengaturan Sistem)
+        $cekRadius = $this->verifikasiRadius($request, 'Absen masuk');
+        if ($cekRadius !== true) return $cekRadius;
+
         // Cari roster hari ini (opsional — boleh tidak ada)
         $roster = JadwalRoster::with('shift')
             ->where('user_id', $user->id)
             ->where('tanggal_dinas', $today)
             ->first();
 
-        // Fallback: shift malam kemarin yang masih berjalan
         if (!$roster) {
             $roster = $this->cariRosterShiftMalamAktif($user->id, $now);
-        }
-
-        // Geofencing
-        $pengaturan  = PengaturanAplikasi::first();
-        $dalamRadius = false;
-        if ($pengaturan && $pengaturan->latitude && $pengaturan->longitude) {
-            $jarak = $this->haversine(
-                (float) $pengaturan->latitude,
-                (float) $pengaturan->longitude,
-                (float) $request->latitude,
-                (float) $request->longitude
-            );
-            $dalamRadius = $jarak <= ($pengaturan->radius_absen ?? 100);
         }
 
         $fotoPath = $request->hasFile('foto')
             ? $request->file('foto')->store('absensi/masuk', 'public')
             : null;
 
-        // ✅ Simpan log — roster_id boleh null
         $log = LogAbsensi::create([
             'user_id'          => $user->id,
             'roster_id'        => $roster?->id,
@@ -77,12 +66,11 @@ class AbsensiController extends Controller
             'latitude_masuk'   => $request->latitude,
             'longitude_masuk'  => $request->longitude,
             'foto_masuk'       => $fotoPath,
-            'jenis_absen'      => $dalamRadius ? 'dalam_radius' : 'luar_jadwal',
+            'jenis_absen'      => 'dalam_radius', // sekarang selalu dalam radius
             'menit_terlambat'  => 0,
             'status_kehadiran' => 'Tanpa Jadwal',
         ]);
 
-        // ✅ Status otomatis: ikut jadwal jika ada, "Tanpa Jadwal" jika tidak
         self::recalculateStatus($log);
 
         return response()->json([
@@ -100,7 +88,7 @@ class AbsensiController extends Controller
     }
 
     /**
-     * ABSEN PULANG — cari log aktif (mendukung shift malam lewat tengah malam).
+     * ✅ ABSEN PULANG — juga wajib dalam radius (dinamis dari Pengaturan Sistem).
      */
     public function clockOut(Request $request)
     {
@@ -125,6 +113,10 @@ class AbsensiController extends Controller
             ], 422);
         }
 
+        // ✅ CEK RADIUS (selalu membaca nilai TERBARU dari Pengaturan Sistem)
+        $cekRadius = $this->verifikasiRadius($request, 'Absen pulang');
+        if ($cekRadius !== true) return $cekRadius;
+
         $fotoPath = $request->hasFile('foto')
             ? $request->file('foto')->store('absensi/pulang', 'public')
             : null;
@@ -136,7 +128,6 @@ class AbsensiController extends Controller
             'foto_pulang'      => $fotoPath,
         ]);
 
-        // Hitung ulang durasi + status (jaga-jaga roster berubah saat shift berjalan)
         self::recalculateStatus($logAktif);
 
         return response()->json([
@@ -184,8 +175,7 @@ class AbsensiController extends Controller
     }
 
     /**
-     * ✅ INTI LOGIKA BARU: hitung ulang status berdasarkan JADWAL TERBARU.
-     * Dipanggil saat absen, saat pulang, dan saat roster dibuat/diubah/dihapus.
+     * ✅ Hitung ulang status berdasarkan JADWAL TERBARU (retroaktif).
      */
     public static function recalculateStatus(LogAbsensi $log): void
     {
@@ -193,11 +183,8 @@ class AbsensiController extends Controller
             ? JadwalRoster::with('shift')->find($log->roster_id)
             : null;
 
-        // Tanpa roster → Tanpa Jadwal (atau Luar Jadwal jika di luar radius)
-        if (!$roster || !$roster->shift || !$log->waktu_masuk) {
-            $log->status_kehadiran = ($log->jenis_absen === 'luar_jadwal')
-                ? 'Luar Jadwal'
-                : 'Tanpa Jadwal';
+        if (!$roster || !$log->waktu_masuk) {
+            $log->status_kehadiran = 'Tanpa Jadwal';
             $log->menit_terlambat = 0;
 
             if ($log->waktu_masuk && $log->waktu_pulang) {
@@ -207,18 +194,26 @@ class AbsensiController extends Controller
             return;
         }
 
-        // Ada roster → bandingkan dengan jam masuk shift (jadwal TERBARU)
-        $shift    = $roster->shift;
-        $expected = Carbon::parse($roster->tanggal_dinas . ' ' . $shift->jam_masuk);
+        // ✅ Ambil jam dari custom atau shift
+        $jamMasuk = $roster->custom_jam_masuk ?? ($roster->shift ? (string) $roster->shift->jam_masuk : null);
+        $toleransi = $roster->shift ? (int) ($roster->shift->toleransi_terlambat_menit ?? 5) : 5;
 
-        $selisih    = $expected->diffInMinutes($log->waktu_masuk, false); // positif = terlambat
-        $toleransi  = (int) ($shift->toleransi_terlambat_menit ?? 5);
+        if (!$jamMasuk) {
+            $log->status_kehadiran = 'Tanpa Jadwal';
+            $log->menit_terlambat = 0;
+            $log->save();
+            return;
+        }
+
+        $expected = Carbon::parse($roster->tanggal_dinas . ' ' . $jamMasuk);
+
+        $selisih = $expected->diffInMinutes($log->waktu_masuk, false);
 
         $log->menit_terlambat = ($selisih > $toleransi) ? (int) $selisih : 0;
 
-        $log->status_kehadiran = ($log->jenis_absen === 'luar_jadwal')
-            ? 'Luar Jadwal'
-            : ($log->menit_terlambat > 0 ? 'Terlambat' : 'Tepat Waktu');
+        $log->status_kehadiran = $log->menit_terlambat > 0
+            ? 'Terlambat'
+            : 'Tepat Waktu';
 
         if ($log->waktu_masuk && $log->waktu_pulang) {
             $log->durasi_kerja = $log->waktu_masuk->diffInMinutes($log->waktu_pulang);
@@ -227,7 +222,44 @@ class AbsensiController extends Controller
         $log->save();
     }
 
-    /** Shift malam kemarin yang masih berjalan (untuk absen lewat tengah malam). */
+    /**
+     * ✅ CEK RADIUS DINAMIS — selalu membaca nilai TERBARU dari Pengaturan Sistem.
+     * Admin ubah angka radius → absensi berikutnya langsung memakai nilai baru
+     * (tanpa deploy, tanpa clear cache).
+     *
+     * @return true|JsonResponse  true = lolos, JsonResponse = tolak 403
+     */
+    private function verifikasiRadius(Request $request, string $label = 'Absensi')
+    {
+        $pengaturan = PengaturanAplikasi::first();
+
+        // Jika titik GPS kantor belum diatur, jangan mengunci karyawan
+        if (!$pengaturan || !$pengaturan->latitude || !$pengaturan->longitude) {
+            return true;
+        }
+
+        $jarak = $this->haversine(
+            (float) $pengaturan->latitude,
+            (float) $pengaturan->longitude,
+            (float) $request->latitude,
+            (float) $request->longitude
+        );
+
+        // ✅ BACA LIVE dari Pengaturan Sistem (dinamis)
+        $maxRadius = (int) ($pengaturan->radius_absen ?? 100);
+
+        if ($jarak > $maxRadius) {
+            return response()->json([
+                'success' => false,
+                'message' => $label . ' ditolak: posisi Anda ±' . round($jarak)
+                    . ' meter dari kantor (maksimal ' . $maxRadius
+                    . ' meter). Mendekatlah ke area rumah sakit, lalu coba lagi.',
+            ], 403);
+        }
+
+        return true;
+    }
+
     private function cariRosterShiftMalamAktif(int $userId, Carbon $now): ?JadwalRoster
     {
         $kemarin = $now->copy()->subDay()->toDateString();
@@ -239,7 +271,6 @@ class AbsensiController extends Controller
 
         if (!$roster || !$roster->shift) return null;
 
-        // Overnight: jam_pulang < jam_masuk (mis. 20:00 → 07:00)
         return ($roster->shift->jam_pulang < $roster->shift->jam_masuk) ? $roster : null;
     }
 
