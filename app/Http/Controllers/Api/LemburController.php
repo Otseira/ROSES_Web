@@ -388,6 +388,10 @@ class LemburController extends Controller
         $mulai   = $l->waktu_mulai_lembur ? Carbon::parse($l->waktu_mulai_lembur) : null;
         $selesai = $l->waktu_selesai_lembur ? Carbon::parse($l->waktu_selesai_lembur) : null;
 
+        $nama     = $user?->name ?? '-';
+        $nik      = $user?->nik ?? '-';
+        $unitNama = $unit?->nama_unit ?? '-';
+
         $fotoProfil = null;
         if ($user) {
             $pathFoto = $user->foto_profil ?? $user->foto ?? null;
@@ -395,40 +399,51 @@ class LemburController extends Controller
         }
 
         return array_merge($l->toArray(), [
-            // Alias nama & unit
-            'nama'          => $user?->name ?? '-',
-            'nama_karyawan' => $user?->name ?? '-',
-            'unit'          => $unit?->nama_unit ?? '-',
-            'unit_kerja'    => $unit?->nama_unit ?? '-',
+            // ✅ KUNCI PERSIS yang dibaca validasi_lembur_screen.dart
+            'pegawai_nama' => $nama,
+            'pegawai_nik'  => $nik,
+            'unit_nama'    => $unitNama,
+            'lat_masuk'    => $l->latitude_masuk   !== null ? (float) $l->latitude_masuk   : null,
+            'lng_masuk'    => $l->longitude_masuk  !== null ? (float) $l->longitude_masuk  : null,
+            'lat_keluar'   => $l->latitude_keluar  !== null ? (float) $l->latitude_keluar  : null,
+            'lng_keluar'   => $l->longitude_keluar !== null ? (float) $l->longitude_keluar : null,
 
-            // Alias waktu (format lengkap & jam saja)
+            // Alias cadangan (aman untuk layar lain)
+            'nama'          => $nama,
+            'nama_karyawan' => $nama,
+            'nama_pegawai'  => $nama,
+            'unit'          => $unitNama,
+            'unit_kerja'    => $unitNama,
+            'nama_unit'     => $unitNama,
+
+            // Waktu
             'waktu_mulai'   => $mulai?->format('Y-m-d H:i'),
             'waktu_selesai' => $selesai?->format('Y-m-d H:i'),
             'jam_mulai'     => $mulai?->format('H:i'),
             'jam_selesai'   => $selesai?->format('H:i'),
             'tanggal'       => $mulai?->format('d/m/Y'),
 
-            // Alias durasi
+            // Durasi & status
             'total_jam'  => $l->total_jam_lembur,
             'durasi_jam' => $l->total_jam_lembur,
+            'status'     => $l->status_validasi,
 
-            // Alias status
-            'status' => $l->status_validasi,
-
-            // URL foto (siap tampil di Flutter)
+            // URL foto
             'foto'            => $l->foto_masuk ? url('storage/' . $l->foto_masuk) : null,
             'foto_masuk_url'  => $l->foto_masuk ? url('storage/' . $l->foto_masuk) : null,
             'foto_keluar_url' => $l->foto_keluar ? url('storage/' . $l->foto_keluar) : null,
+            'foto_profil'     => $fotoProfil,
 
-            // Objek user lengkap dengan alias
+            // Objek user lengkap
             'user' => $user ? [
-                'id'         => $user->id,
-                'name'       => $user->name,
-                'nama'       => $user->name,
-                'unit'       => $unit?->nama_unit,
-                'nama_unit'  => $unit?->nama_unit,
-                'unit_kerja' => $unit?->nama_unit,
-                'foto'       => $fotoProfil,
+                'id'          => $user->id,
+                'name'        => $user->name,
+                'nama'        => $user->name,
+                'nik'         => $user->nik,
+                'unit'        => $unitNama,
+                'nama_unit'   => $unitNama,
+                'unit_kerja'  => $unitNama,
+                'foto'        => $fotoProfil,
                 'foto_profil' => $fotoProfil,
             ] : null,
         ]);
