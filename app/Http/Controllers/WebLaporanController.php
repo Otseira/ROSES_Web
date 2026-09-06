@@ -304,7 +304,9 @@ class WebLaporanController extends Controller
             return;
         }
 
-        $expected = \Carbon\Carbon::parse($roster->tanggal_dinas . ' ' . $jamMasuk);
+        // ✅ FIX: tanggal_dinas bisa berupa objek Carbon → format dulu ke Y-m-d
+        $tanggalStr = \Carbon\Carbon::parse($roster->tanggal_dinas)->format('Y-m-d');
+        $expected   = \Carbon\Carbon::parse($tanggalStr . ' ' . $jamMasuk);
 
         // Shift malam (overnight)
         $jamPulang = $roster->custom_jam_pulang ?? ($roster->shift ? (string) $roster->shift->jam_pulang : null);

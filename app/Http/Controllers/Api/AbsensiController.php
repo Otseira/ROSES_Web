@@ -205,7 +205,9 @@ class AbsensiController extends Controller
             return;
         }
 
-        $expected = Carbon::parse($roster->tanggal_dinas . ' ' . $jamMasuk);
+        // ✅ FIX: tanggal_dinas bisa berupa objek Carbon → format dulu ke Y-m-d
+        $tanggalStr = Carbon::parse($roster->tanggal_dinas)->format('Y-m-d');
+        $expected   = Carbon::parse($tanggalStr . ' ' . $jamMasuk);
 
         $selisih = $expected->diffInMinutes($log->waktu_masuk, false);
 
