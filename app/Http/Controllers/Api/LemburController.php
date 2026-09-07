@@ -13,7 +13,8 @@ use Illuminate\Http\Request;
 class LemburController extends Controller
 {
     /**
-     * LEMBUR EKSTENSI SHIFT (tidak berubah)
+     * LEMBUR EKSTENSI SHIFT — 1x tekan: akhiri jam dinas + catat lembur.
+     * ✅ Wajib dalam radius • foto disalin sebagai foto pulang.
      */
     public function storeEkstensi(Request $request)
     {
@@ -29,6 +30,7 @@ class LemburController extends Controller
         $now   = Carbon::now();
         $today = $now->toDateString();
 
+        // Cegah duplikasi ekstensi hari ini
         $cekEkstensi = LogLembur::where('user_id', $user->id)
             ->where('jenis_lembur', 'Ekstensi Shift')
             ->whereDate('waktu_mulai_lembur', $today)
@@ -37,6 +39,7 @@ class LemburController extends Controller
             return response()->json(['success' => false, 'message' => 'Anda sudah mengajukan lembur ekstensi untuk hari ini.'], 422);
         }
 
+        // Ambil roster hari ini
         $roster = JadwalRoster::with('shift')
             ->where('user_id', $user->id)
             ->where('tanggal_dinas', $today)
@@ -45,6 +48,7 @@ class LemburController extends Controller
             return response()->json(['success' => false, 'message' => 'Jadwal dinas tidak ditemukan. Gunakan On-Call untuk hari libur.'], 422);
         }
 
+        // Hitung jam pulang shift (handle shift malam)
         $shift = $roster->shift;
         $jamPulangShift = Carbon::parse($today . ' ' . $shift->jam_pulang);
         if (Carbon::parse($shift->jam_pulang)->lessThan(Carbon::parse($shift->jam_masuk))) {
@@ -58,6 +62,7 @@ class LemburController extends Controller
             ], 422);
         }
 
+        // Range terkunci: 1 s/d (sekarang − akhir shift)
         $maxMenit    = intdiv($now->getTimestamp() - $jamPulangShift->getTimestamp(), 60);
         $durasiMenit = $request->filled('durasi_menit') ? (int) $request->durasi_menit : $maxMenit;
 
@@ -71,32 +76,31 @@ class LemburController extends Controller
             ], 422);
         }
 
-        $waktuSelesai = $now;
-        $waktuMulai   = $now->copy()->subMinutes($durasiMenit);
-        $totalJam     = round($durasiMenit / 60, 2);
-
-        // Geofencing DULUAN (sebelum menyimpan foto)
-        $cekRadius = $this->verifikasiRadius($request);
+        // ✅ CEK RADIUS (seragam, dinamis dari Pengaturan Sistem)
+        $cekRadius = $this->verifikasiRadius($request, 'Lembur ekstensi');
         if ($cekRadius !== true) return $cekRadius;
 
         // Simpan foto lembur
         $file = $request->file('foto_masuk');
         $path = $file->storeAs('lembur_masuk', 'lembur_' . ($user->nik ?? $user->id) . '_' . time() . '.' . $file->extension(), 'public');
 
-        // ✅ AUTO CLOCK-OUT: akhiri jam dinas + copy foto lembur sebagai foto pulang
+        // ✅ AUTO CLOCK-OUT + foto lembur menjadi foto pulang
+        $waktuSelesai = $now;
+        $waktuMulai   = $now->copy()->subMinutes($durasiMenit);
+        $totalJam     = round($durasiMenit / 60, 2);
+
         $logAbsen = LogAbsensi::where('roster_id', $roster->id)->first();
         $autoClockOut = false;
         if ($logAbsen && $logAbsen->waktu_pulang === null) {
             $logAbsen->waktu_pulang      = $now;
-            $logAbsen->foto_pulang       = $path; // ✅ FOTO LEMBUR → FOTO PULANG
+            $logAbsen->foto_pulang       = $path; // ✅ foto lembur = foto pulang
             $logAbsen->latitude_pulang   = $request->latitude;
             $logAbsen->longitude_pulang  = $request->longitude;
-            $logAbsen->ip_address_pulang = $request->ip();
             $logAbsen->save();
             $autoClockOut = true;
         }
 
-        LogLembur::create([
+        $lembur = LogLembur::create([
             'user_id'              => $user->id,
             'jenis_lembur'         => 'Ekstensi Shift',
             'waktu_mulai_lembur'   => $waktuMulai,
@@ -112,12 +116,13 @@ class LemburController extends Controller
         return response()->json([
             'success' => true,
             'message' => ($autoClockOut ? '✓ Absen pulang tercatat otomatis. ' : '') . '✓ Lembur ekstensi berhasil disimpan.',
-            'data'    => $this->normalizeLembur(LogLembur::with('user.unitKerja')->latest()->first()),
+            'data'    => $this->normalizeLembur($lembur->load('user.unitKerja')),
         ], 200);
     }
 
     /**
-     * ON-CALL MASUK — ✅ kini aman untuk kolom nullable + error terbaca jelas
+     * ON-CALL MASUK — seperti absen masuk (foto & GPS tersendiri).
+     * ✅ Wajib dalam radius (kebijakan seragam).
      */
     public function clockInOnCall(Request $request)
     {
@@ -131,6 +136,7 @@ class LemburController extends Controller
         $user = $request->user()->load('unitKerja');
         $now  = Carbon::now();
 
+        // Cegah sesi ganda
         $aktif = LogLembur::where('user_id', $user->id)
             ->where('jenis_lembur', 'On-Call')
             ->whereNull('waktu_selesai_lembur')
@@ -142,31 +148,26 @@ class LemburController extends Controller
             ], 422);
         }
 
-        $cekRadius = $this->verifikasiRadius($request);
+        // ✅ CEK RADIUS (seragam, dinamis dari Pengaturan Sistem)
+        $cekRadius = $this->verifikasiRadius($request, 'On-Call masuk');
         if ($cekRadius !== true) return $cekRadius;
 
+        // Simpan foto on-call masuk (terpisah dari lembur)
         $file = $request->file('foto_masuk');
         $path = $file->storeAs('oncall_masuk', 'oncall_masuk_' . ($user->nik ?? $user->id) . '_' . time() . '.' . $file->extension(), 'public');
 
-        try {
-            $lembur = LogLembur::create([
-                'user_id'              => $user->id,
-                'jenis_lembur'         => 'On-Call',
-                'waktu_mulai_lembur'   => $now,
-                'waktu_selesai_lembur' => null,   // ✅ kini kolom nullable
-                'total_jam_lembur'     => null,   // ✅ kini kolom nullable
-                'status_validasi'      => 'Pending',
-                'keterangan'           => $request->keterangan,
-                'latitude_masuk'       => $request->latitude,
-                'longitude_masuk'      => $request->longitude,
-                'foto_masuk'           => $path,
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Gagal menyimpan On-Call: ' . $e->getMessage(),
-            ], 500);
-        }
+        $lembur = LogLembur::create([
+            'user_id'              => $user->id,
+            'jenis_lembur'         => 'On-Call',
+            'waktu_mulai_lembur'   => $now,
+            'waktu_selesai_lembur' => null,
+            'total_jam_lembur'     => null,
+            'status_validasi'      => 'Pending',
+            'keterangan'           => $request->keterangan,
+            'latitude_masuk'       => $request->latitude,
+            'longitude_masuk'      => $request->longitude,
+            'foto_masuk'           => $path,
+        ]);
 
         return response()->json([
             'success' => true,
@@ -176,7 +177,8 @@ class LemburController extends Controller
     }
 
     /**
-     * ON-CALL KELUAR (tidak berubah, response dinormalisasi)
+     * ON-CALL KELUAR — akhiri sesi + durasi otomatis + auto clock-out.
+     * ✅ Wajib dalam radius (kebijakan seragam).
      */
     public function clockOutOnCall(Request $request)
     {
@@ -201,21 +203,11 @@ class LemburController extends Controller
             ], 422);
         }
 
-        $cekRadius = $this->verifikasiRadius($request);
+        // ✅ CEK RADIUS (seragam, dinamis dari Pengaturan Sistem)
+        $cekRadius = $this->verifikasiRadius($request, 'On-Call keluar');
         if ($cekRadius !== true) return $cekRadius;
 
-        $today  = $now->toDateString();
-        $roster = JadwalRoster::where('user_id', $user->id)->where('tanggal_dinas', $today)->first();
-        $autoClockOut = false;
-        if ($roster) {
-            $logAbsen = LogAbsensi::where('roster_id', $roster->id)->whereNull('waktu_pulang')->first();
-            if ($logAbsen) {
-                $logAbsen->waktu_pulang = $now;
-                $logAbsen->save();
-                $autoClockOut = true;
-            }
-        }
-
+        // Durasi otomatis: masuk → keluar
         $waktuMulai  = Carbon::parse($lembur->waktu_mulai_lembur);
         $durasiMenit = intdiv($now->getTimestamp() - $waktuMulai->getTimestamp(), 60);
         $totalJam    = round($durasiMenit / 60, 2);
@@ -224,8 +216,25 @@ class LemburController extends Controller
             return response()->json(['success' => false, 'message' => 'Durasi on-call belum tercatat (baru saja masuk).'], 422);
         }
 
+        // Simpan foto on-call keluar (terpisah)
         $file = $request->file('foto_keluar');
         $path = $file->storeAs('oncall_keluar', 'oncall_keluar_' . ($user->nik ?? $user->id) . '_' . time() . '.' . $file->extension(), 'public');
+
+        // ✅ AUTO CLOCK-OUT + foto on-call keluar menjadi foto pulang (jika belum ada)
+        $today  = $now->toDateString();
+        $roster = JadwalRoster::where('user_id', $user->id)->where('tanggal_dinas', $today)->first();
+        $autoClockOut = false;
+        if ($roster) {
+            $logAbsen = LogAbsensi::where('roster_id', $roster->id)->whereNull('waktu_pulang')->first();
+            if ($logAbsen) {
+                $logAbsen->waktu_pulang      = $now;
+                $logAbsen->foto_pulang       = $path; // ✅ foto on-call keluar = foto pulang
+                $logAbsen->latitude_pulang   = $request->latitude;
+                $logAbsen->longitude_pulang  = $request->longitude;
+                $logAbsen->save();
+                $autoClockOut = true;
+            }
+        }
 
         $lembur->update([
             'waktu_selesai_lembur' => $now,
@@ -242,6 +251,7 @@ class LemburController extends Controller
         ], 200);
     }
 
+    /** Cek sesi on-call aktif (untuk tombol dinamis di mobile). */
     public function onCallAktif(Request $request)
     {
         $lembur = LogLembur::with('user.unitKerja')
@@ -257,6 +267,7 @@ class LemburController extends Controller
         ], 200);
     }
 
+    /** Info shift hari ini (untuk default durasi ekstensi). */
     public function infoShiftHariIni(Request $request)
     {
         $user  = $request->user();
@@ -288,9 +299,7 @@ class LemburController extends Controller
         ], 200);
     }
 
-    /**
-     * ✅ LIST VALIDASI — payload dinormalisasi + alias field agar Flutter pasti terbaca
-     */
+    /** List validasi untuk atasan — payload lengkap untuk aplikasi. */
     public function listValidasi(Request $request)
     {
         $user = $request->user();
@@ -310,17 +319,16 @@ class LemburController extends Controller
             if ($unitIds->isEmpty()) {
                 $unitIds = collect([$user->unit_kerja_id]);
             }
-            $query->whereHas('user', fn($q) => $q->whereIn('unit_kerja_id', $unitIds));
+            $query->whereHas('user', fn ($q) => $q->whereIn('unit_kerja_id', $unitIds));
         }
 
-        $data = $query->get()->map(fn($l) => $this->normalizeLembur($l));
-
-        return response()->json(['success' => true, 'data' => $data], 200);
+        return response()->json([
+            'success' => true,
+            'data'    => $query->get()->map(fn ($l) => $this->normalizeLembur($l)),
+        ], 200);
     }
 
-    /**
-     * ✅ PROSES VALIDASI — menerima berbagai variasi key & nilai status dari aplikasi
-     */
+    /** Proses validasi — toleran terhadap variasi key/nilai status dari aplikasi. */
     public function prosesValidasi(Request $request, $id)
     {
         $user = $request->user();
@@ -329,30 +337,20 @@ class LemburController extends Controller
             return response()->json(['success' => false, 'message' => 'Tidak memiliki hak akses.'], 403);
         }
 
-        // ✅ Toleran: terima status dari beberapa kemungkinan key
         $raw  = $request->input('status')
-            ?? $request->input('status_validasi')
-            ?? $request->input('action')
-            ?? $request->input('nilai');
+             ?? $request->input('status_validasi')
+             ?? $request->input('action')
+             ?? $request->input('nilai');
         $norm = strtolower(trim((string) $raw));
 
         $map = [
-            'disetujui' => 'Disetujui',
-            'setujui' => 'Disetujui',
-            'approve' => 'Disetujui',
-            'approved'  => 'Disetujui',
-            'terima' => 'Disetujui',
-            'ditolak'   => 'Ditolak',
-            'tolak' => 'Ditolak',
-            'reject' => 'Ditolak',
-            'rejected' => 'Ditolak',
+            'disetujui' => 'Disetujui', 'setujui' => 'Disetujui', 'approve' => 'Disetujui',
+            'approved'  => 'Disetujui', 'terima' => 'Disetujui',
+            'ditolak'   => 'Ditolak', 'tolak' => 'Ditolak', 'reject' => 'Ditolak', 'rejected' => 'Ditolak',
         ];
 
         if (!isset($map[$norm])) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Status validasi tidak dikenali. Kirim status: Disetujui / Ditolak.',
-            ], 422);
+            return response()->json(['success' => false, 'message' => 'Status validasi tidak dikenali. Kirim status: Disetujui / Ditolak.'], 422);
         }
 
         $lembur = LogLembur::with('user')->findOrFail($id);
@@ -385,8 +383,57 @@ class LemburController extends Controller
     }
 
     // ===================================================================
-    // ✅ HELPER: normalisasi payload lembur (field mentah + alias untuk Flutter)
+    // HELPER
     // ===================================================================
+
+    /**
+     * ✅ CEK RADIUS DINAMIS — nilai selalu dibaca live dari Pengaturan Sistem.
+     * Berlaku seragam: ekstensi shift, on-call masuk, on-call keluar.
+     */
+    private function verifikasiRadius(Request $request, string $label = 'Absensi')
+    {
+        $pengaturan = PengaturanAplikasi::first();
+
+        if (!$pengaturan || !$pengaturan->latitude || !$pengaturan->longitude) {
+            return true; // GPS kantor belum diatur → jangan mengunci
+        }
+
+        $jarak = $this->calculateDistance(
+            (float) $pengaturan->latitude,
+            (float) $pengaturan->longitude,
+            (float) $request->latitude,
+            (float) $request->longitude
+        );
+
+        $maxRadius = $this->getMaxRadius($pengaturan);
+
+        if ($jarak > $maxRadius) {
+            return response()->json([
+                'success' => false,
+                'message' => $label . ' ditolak: posisi Anda ±' . round($jarak)
+                    . ' meter dari kantor (maksimal ' . $maxRadius
+                    . ' meter). Mendekatlah ke area rumah sakit, lalu coba lagi.',
+            ], 403);
+        }
+
+        return true;
+    }
+
+    /** Baca radius — tahan terhadap perbedaan nama kolom di tabel pengaturan. */
+    private function getMaxRadius($pengaturan): int
+    {
+        if (!$pengaturan) return 100;
+
+        foreach ($pengaturan->getAttributes() as $key => $val) {
+            if (str_contains($key, 'radius') && $val !== null && $val !== '') {
+                return (int) $val;
+            }
+        }
+
+        return 100;
+    }
+
+    /** Payload lembur dinormalisasi — semua key yang dibaca aplikasi Flutter. */
     private function normalizeLembur($l): array
     {
         $user = $l->user;
@@ -406,7 +453,7 @@ class LemburController extends Controller
         }
 
         return array_merge($l->toArray(), [
-            // ✅ KUNCI PERSIS yang dibaca validasi_lembur_screen.dart
+            // Key persis yang dibaca validasi_lembur_screen.dart
             'pegawai_nama' => $nama,
             'pegawai_nik'  => $nik,
             'unit_nama'    => $unitNama,
@@ -415,7 +462,7 @@ class LemburController extends Controller
             'lat_keluar'   => $l->latitude_keluar  !== null ? (float) $l->latitude_keluar  : null,
             'lng_keluar'   => $l->longitude_keluar !== null ? (float) $l->longitude_keluar : null,
 
-            // Alias cadangan (aman untuk layar lain)
+            // Alias cadangan
             'nama'          => $nama,
             'nama_karyawan' => $nama,
             'nama_pegawai'  => $nama,
@@ -454,26 +501,6 @@ class LemburController extends Controller
                 'foto_profil' => $fotoProfil,
             ] : null,
         ]);
-    }
-
-    // ===================================================================
-    // HELPER RADIUS (dibuat toleran terhadap nama kolom radius)
-    // ===================================================================
-    private function verifikasiRadius(Request $request)
-    {
-        $pengaturan  = PengaturanAplikasi::first();
-        $hospitalLat = $pengaturan ? (float) $pengaturan->latitude  : -0.9471;
-        $hospitalLng = $pengaturan ? (float) $pengaturan->longitude : 100.3511;
-        $maxRadius   = $pengaturan ? (int) ($pengaturan->radius_meter ?? $pengaturan->radius_absen ?? 50) : 50;
-
-        $distance = $this->calculateDistance($request->latitude, $request->longitude, $hospitalLat, $hospitalLng);
-        if ($distance > $maxRadius) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Ditolak. Anda di luar radius rumah sakit (' . round($distance) . ' meter).',
-            ], 403);
-        }
-        return true;
     }
 
     private function calculateDistance($lat1, $lon1, $lat2, $lon2)

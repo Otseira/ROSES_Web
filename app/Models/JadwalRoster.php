@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class JadwalRoster extends Model
 {
@@ -33,7 +34,17 @@ class JadwalRoster extends Model
     }
 
     /**
-     * Ambil jam masuk:优先 custom, fallback ke shift.
+     * ✅ RELASI YANG HILANG: log absensi yang terhubung ke roster ini.
+     * Dipakai layar "Jadwal Dinas Bulanan" di mobile untuk menampilkan
+     * status Tepat Waktu / Terlambat per tanggal.
+     */
+    public function logAbsensi(): HasOne
+    {
+        return $this->hasOne(LogAbsensi::class, 'roster_id');
+    }
+
+    /**
+     * Jam masuk: prioritas custom, fallback ke shift.
      */
     public function getJamMasukAttribute(): ?string
     {
@@ -41,7 +52,7 @@ class JadwalRoster extends Model
     }
 
     /**
-     * Ambil jam pulang:优先 custom, fallback ke shift.
+     * Jam pulang: prioritas custom, fallback ke shift.
      */
     public function getJamPulangAttribute(): ?string
     {
@@ -49,7 +60,7 @@ class JadwalRoster extends Model
     }
 
     /**
-     * Ambil nama shift:优先 custom, fallback ke shift.
+     * Nama shift: prioritas custom, fallback ke shift.
      */
     public function getNamaShiftAttribute(): ?string
     {

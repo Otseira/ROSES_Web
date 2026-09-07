@@ -248,7 +248,7 @@ class AbsensiController extends Controller
         );
 
         // ✅ BACA LIVE dari Pengaturan Sistem (dinamis)
-        $maxRadius = (int) ($pengaturan->radius_absen ?? 100);
+        $maxRadius = $this->getMaxRadius($pengaturan);
 
         if ($jarak > $maxRadius) {
             return response()->json([
@@ -283,5 +283,22 @@ class AbsensiController extends Controller
         $dLon = deg2rad($lon2 - $lon1);
         $a    = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2) ** 2;
         return $R * 2 * atan2(sqrt($a), sqrt(1 - $a));
+    }
+
+    /**
+     * ✅ Ambil nilai radius dari Pengaturan — tahan terhadap perbedaan nama kolom
+     * (radius_absen / radius_meter / radius / apa pun yang mengandung kata "radius").
+     */
+    private function getMaxRadius($pengaturan): int
+    {
+        if (!$pengaturan) return 100;
+
+        foreach ($pengaturan->getAttributes() as $key => $val) {
+            if (str_contains($key, 'radius') && $val !== null && $val !== '') {
+                return (int) $val;
+            }
+        }
+
+        return 100; // fallback terakhir
     }
 }
