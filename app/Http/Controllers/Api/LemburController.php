@@ -148,6 +148,26 @@ class LemburController extends Controller
             ], 422);
         }
 
+        // ✅ LOGIKA BARU: On-Call hanya boleh jika:
+        //    a) Belum ada absen masuk hari ini (hari libur / tanpa jadwal), ATAU
+        //    b) Sudah absen masuk DAN sudah absen pulang (setelah jam dinas selesai)
+        $logAbsenHariIni = LogAbsensi::where('user_id', $user->id)
+            ->whereDate('waktu_masuk', $now->toDateString())
+            ->latest('waktu_masuk')
+            ->first();
+
+        if ($logAbsenHariIni) {
+            // Sudah ada absen masuk — cek apakah sudah absen pulang
+            if ($logAbsenHariIni->waktu_pulang === null) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'On-Call tidak bisa dimulai saat jam dinas masih aktif. Gunakan "Ekstensi Shift" untuk menambah waktu kerja, atau lakukan Absen Pulang terlebih dahulu.',
+                ], 422);
+            }
+        }
+        // Jika $logAbsenHariIni null → boleh on-call (hari libur / tanpa jadwal)
+        // Jika $logAbsenHariIni tidak null DAN sudah absen pulang → boleh on-call (setelah jam dinas)
+
         // ✅ CEK RADIUS (seragam, dinamis dari Pengaturan Sistem)
         $cekRadius = $this->verifikasiRadius($request, 'On-Call masuk');
         if ($cekRadius !== true) return $cekRadius;
@@ -319,12 +339,12 @@ class LemburController extends Controller
             if ($unitIds->isEmpty()) {
                 $unitIds = collect([$user->unit_kerja_id]);
             }
-            $query->whereHas('user', fn ($q) => $q->whereIn('unit_kerja_id', $unitIds));
+            $query->whereHas('user', fn($q) => $q->whereIn('unit_kerja_id', $unitIds));
         }
 
         return response()->json([
             'success' => true,
-            'data'    => $query->get()->map(fn ($l) => $this->normalizeLembur($l)),
+            'data'    => $query->get()->map(fn($l) => $this->normalizeLembur($l)),
         ], 200);
     }
 
@@ -338,15 +358,21 @@ class LemburController extends Controller
         }
 
         $raw  = $request->input('status')
-             ?? $request->input('status_validasi')
-             ?? $request->input('action')
-             ?? $request->input('nilai');
+            ?? $request->input('status_validasi')
+            ?? $request->input('action')
+            ?? $request->input('nilai');
         $norm = strtolower(trim((string) $raw));
 
         $map = [
-            'disetujui' => 'Disetujui', 'setujui' => 'Disetujui', 'approve' => 'Disetujui',
-            'approved'  => 'Disetujui', 'terima' => 'Disetujui',
-            'ditolak'   => 'Ditolak', 'tolak' => 'Ditolak', 'reject' => 'Ditolak', 'rejected' => 'Ditolak',
+            'disetujui' => 'Disetujui',
+            'setujui' => 'Disetujui',
+            'approve' => 'Disetujui',
+            'approved'  => 'Disetujui',
+            'terima' => 'Disetujui',
+            'ditolak'   => 'Ditolak',
+            'tolak' => 'Ditolak',
+            'reject' => 'Ditolak',
+            'rejected' => 'Ditolak',
         ];
 
         if (!isset($map[$norm])) {

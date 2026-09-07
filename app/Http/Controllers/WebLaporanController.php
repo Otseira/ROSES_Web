@@ -265,6 +265,7 @@ class WebLaporanController extends Controller
             });
 
         $lemburs = LogLembur::with('user')
+            ->where('status_validasi', 'Disetujui')   // ✅ filter utama
             ->whereBetween('waktu_mulai_lembur', [$startDate, $endDate])
             ->when($unit, fn($q) => $q->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unit)))
             ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {
