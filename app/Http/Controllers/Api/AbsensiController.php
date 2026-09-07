@@ -209,7 +209,7 @@ class AbsensiController extends Controller
         $tanggalStr = Carbon::parse($roster->tanggal_dinas)->format('Y-m-d');
         $expected   = Carbon::parse($tanggalStr . ' ' . $jamMasuk);
 
-        $selisih = $expected->diffInMinutes($log->waktu_masuk, false);
+        $selisih   = (int) floor($expected->diffInMinutes($log->waktu_masuk, false));
 
         $log->menit_terlambat = ($selisih > $toleransi) ? (int) $selisih : 0;
 

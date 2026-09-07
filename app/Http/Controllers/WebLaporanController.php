@@ -314,7 +314,7 @@ class WebLaporanController extends Controller
             $expected->subDay();
         }
 
-        $selisih = $expected->diffInMinutes($log->waktu_masuk, false);
+        $selisih   = (int) floor($expected->diffInMinutes($log->waktu_masuk, false));
 
         $log->menit_terlambat = ($selisih > $toleransi) ? (int) $selisih : 0;
 
