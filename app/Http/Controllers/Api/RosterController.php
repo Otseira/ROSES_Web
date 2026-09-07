@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\JadwalRoster;
 use App\Models\MasterShift;
+use App\Models\LogLembur;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -187,18 +188,16 @@ class RosterController extends Controller
             ->get()
             ->keyBy(fn($r) => (int) \Carbon\Carbon::parse($r->tanggal_dinas)->day);
 
-        $lembur = \App\Models\LogLembur::where('user_id', $user->id)
-            ->where(function ($q) use ($start, $end) {
-                $q->whereBetween('waktu_mulai_lembur', [$start->toDateTimeString(), $end->toDateTimeString()])
-                    ->orWhereBetween('waktu_selesai_lembur', [$start->toDateTimeString(), $end->toDateTimeString()]);
-            })
+        $lemburs = LogLembur::where('user_id', $user->id)
+            ->where('status_validasi', 'Disetujui')
+            ->whereBetween('waktu_mulai_lembur', [$start, $end])
             ->get();
 
         $fmtHm = fn($t) => $t ? substr(\Carbon\Carbon::parse($t)->format('H:i:s'), 0, 5) : null;
 
         $masukByDay = [];
         $keluarByDay = [];
-        foreach ($lembur as $l) {
+        foreach ($lemburs as $l) {
             if ($l->waktu_mulai_lembur) {
                 $m = \Carbon\Carbon::parse($l->waktu_mulai_lembur);
                 if ($m->gte($start) && $m->lte($end)) $masukByDay[$m->day] ??= $fmtHm($l->waktu_mulai_lembur);
@@ -240,6 +239,11 @@ class RosterController extends Controller
                 'user_nama'   => $user->name,
                 'hari'        => $hari,
             ],
+        ], 200, [
+            // ✅ Anti-cache: aplikasi mobile selalu ambil data fresh
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Pragma' => 'no-cache',
+            'Expires' => '0',
         ]);
     }
 }
