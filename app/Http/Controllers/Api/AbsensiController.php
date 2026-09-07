@@ -41,6 +41,20 @@ class AbsensiController extends Controller
             ], 422);
         }
 
+        // ✅ BARU: satu sesi absen per hari — jika hari ini sudah absen pulang,
+        //    absen masuk lagi DITOLAK. Tugas tambahan hanya lewat On-Call.
+        $sudahPulang = LogAbsensi::where('user_id', $user->id)
+            ->whereDate('waktu_masuk', $today)
+            ->whereNotNull('waktu_pulang')
+            ->exists();
+
+        if ($sudahPulang) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Absensi hari ini sudah selesai karena Anda sudah absen pulang. Untuk tugas tambahan setelah pulang, gunakan menu On-Call.',
+            ], 422);
+        }
+
         // ✅ CEK RADIUS (selalu membaca nilai TERBARU dari Pengaturan Sistem)
         $cekRadius = $this->verifikasiRadius($request, 'Absen masuk');
         if ($cekRadius !== true) return $cekRadius;

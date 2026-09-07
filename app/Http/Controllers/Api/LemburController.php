@@ -39,6 +39,19 @@ class LemburController extends Controller
             return response()->json(['success' => false, 'message' => 'Anda sudah mengajukan lembur ekstensi untuk hari ini.'], 422);
         }
 
+        // ✅ BARU: sudah absen pulang hari ini → lembur tambahan hanya lewat On-Call
+        $sudahPulang = LogAbsensi::where('user_id', $user->id)
+            ->whereDate('waktu_masuk', $today)
+            ->whereNotNull('waktu_pulang')
+            ->exists();
+
+        if ($sudahPulang) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anda sudah absen pulang hari ini. Untuk tugas tambahan setelah pulang, gunakan menu On-Call.',
+            ], 422);
+        }
+
         // Ambil roster hari ini
         $roster = JadwalRoster::with('shift')
             ->where('user_id', $user->id)
