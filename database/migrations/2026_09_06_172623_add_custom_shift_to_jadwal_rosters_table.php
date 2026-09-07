@@ -12,8 +12,10 @@ return new class extends Migration
             $table->time('custom_jam_masuk')->nullable()->after('shift_id');
             $table->time('custom_jam_pulang')->nullable()->after('custom_jam_masuk');
             $table->string('custom_nama_shift', 50)->nullable()->after('custom_jam_pulang');
+        });
 
-            // shift_id boleh null jika pakai custom
+        // shift_id wajib nullable agar sel bisa menyimpan shift custom
+        Schema::table('jadwal_rosters', function (Blueprint $table) {
             $table->unsignedBigInteger('shift_id')->nullable()->change();
         });
     }
