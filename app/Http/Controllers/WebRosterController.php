@@ -77,21 +77,6 @@ class WebRosterController extends Controller
                 return response()->json(['success' => false, 'message' => 'Tidak ada data jadwal yang dikirim.']);
             }
 
-            // ✅ BATAS WAKTU: roster bulan berjalan hanya s/d tanggal 7
-            $now = Carbon::now();
-            foreach ($rosterData as $dates) {
-                foreach ($dates as $tanggal => $data) {
-                    $d = Carbon::parse($tanggal);
-                    if ($d->year === $now->year && $d->month === $now->month && $now->day > 7) {
-                        return response()->json([
-                            'success' => false,
-                            'message' => 'Batas waktu penyusunan roster bulan ini sudah lewat (maksimal tanggal 7). Hubungi HRD untuk penyesuaian.',
-                        ], 422);
-                    }
-                    break 2;
-                }
-            }
-
             $userLogin = $request->user();
             $allowed   = $this->allowedUnitIds($userLogin);
 
