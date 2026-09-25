@@ -82,6 +82,14 @@ $shiftMap[(string) $s->id] = [
         </button>
         @endforeach
 
+        <div class="flex items-center gap-1">
+            <span class="text-xs font-extrabold uppercase tracking-widest text-slate-500 mr-1">Sesi:</span>
+            <button type="button" data-sesi="1"
+                class="sesi-btn px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 bg-slate-800 text-white">1</button>
+            <button type="button" data-sesi="2"
+                class="sesi-btn px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 bg-white text-slate-600 hover:bg-slate-100">2</button>
+        </div>
+
         <div class="lg:ml-auto flex flex-wrap gap-2">
             <button type="button" id="btnCustomShift"
                 class="px-4 py-2 rounded-xl text-xs font-extrabold bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700 transition-all active:scale-95 flex items-center gap-1">
@@ -199,54 +207,79 @@ $shiftMap[(string) $s->id] = [
                             <span class="block text-[10px] font-bold text-slate-400">{{ $namaUnit }}</span>
                         </td>
                         @for($i = 1; $i <= $jumlahHari; $i++) @php $tanggalSekarang=$tahun . '-' . str_pad($bulan,
-                            2, '0' , STR_PAD_LEFT) . '-' . str_pad($i, 2, '0' , STR_PAD_LEFT); $rosterHariIni=$pegawai->
-                            rosters->first(fn ($r) => \Carbon\Carbon::parse($r->tanggal_dinas)->format('Y-m-d') ===
-                            $tanggalSekarang);
-                            $isCustom = $rosterHariIni && $rosterHariIni->custom_jam_masuk;
-                            $nilaiAwal = ($rosterHariIni && $rosterHariIni->shift_id) ? $rosterHariIni->shift_id : '';
+                            2, '0' , STR_PAD_LEFT) . '-' . str_pad($i, 2, '0' , STR_PAD_LEFT); $cocokTgl=fn ($r)=>
+                            \Carbon\Carbon::parse($r->tanggal_dinas)->format('Y-m-d') === $tanggalSekarang;
+                            $r1 = $pegawai->rosters->first(fn ($r) => $cocokTgl($r) && (int) $r->sesi === 1);
+                            $r2 = $pegawai->rosters->first(fn ($r) => $cocokTgl($r) && (int) $r->sesi === 2);
 
-                            $displayText = $isCustom
-                            ? substr((string) $rosterHariIni->custom_jam_masuk, 0, 5) . '–' . substr((string)
-                            $rosterHariIni->custom_jam_pulang, 0, 5)
-                            : ($nilaiAwal && $rosterHariIni && $rosterHariIni->shift
-                            ? substr((string) $rosterHariIni->shift->jam_masuk, 0, 5) . '–' . substr((string)
-                            $rosterHariIni->shift->jam_pulang, 0, 5)
-                            : '—');
+                            $fmtSesi = fn ($r) => $r
+                            ? substr((string) ($r->custom_jam_masuk ?? $r->shift?->jam_masuk), 0, 5) . '–' .
+                            substr((string) ($r->custom_jam_pulang ?? $r->shift?->jam_pulang), 0, 5)
+                            : null;
+                            $t1 = $fmtSesi($r1);
+                            $t2 = $fmtSesi($r2);
 
-                            $bgClass = $isCustom
-                            ? 'bg-purple-100 text-purple-700'
-                            : ($nilaiAwal ? ($shiftStyle[$nilaiAwal] ?? 'bg-slate-100 text-slate-600') : 'bg-slate-100
-                            text-slate-400');
-
-                            $tooltipCell = $pegawai->name . ' — ' . $tanggalSekarang
-                            . ($isCustom
-                            ? ' • ' . ($rosterHariIni->custom_nama_shift ?? 'Custom')
-                            : ($rosterHariIni && $rosterHariIni->shift ? ' • ' . $rosterHariIni->shift->nama_shift :
-                            ''));
+                            $cls1 = $r1
+                            ? ($r1->custom_jam_masuk ? 'bg-purple-100 text-purple-700' : ($shiftStyle[$r1->shift_id] ??
+                            'bg-slate-100 text-slate-600'))
+                            : ($r2
+                            ? ($r2->custom_jam_masuk ? 'bg-purple-100 text-purple-700' : ($shiftStyle[$r2->shift_id] ??
+                            'bg-slate-100 text-slate-600'))
+                            : 'bg-slate-100 text-slate-400');
                             @endphp
                             <td class="p-0 border-b border-l border-slate-100" data-day="{{ $i }}">
-                                @if($isCustom)
+                                {{-- Input sesi 1 --}}
+                                @if($r1 && $r1->custom_jam_masuk)
                                 <input type="hidden" name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}][shift_id]"
                                     value="">
                                 <input type="hidden"
                                     name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_jam_masuk]"
-                                    value="{{ $rosterHariIni->custom_jam_masuk }}">
+                                    value="{{ $r1->custom_jam_masuk }}">
                                 <input type="hidden"
                                     name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_jam_pulang]"
-                                    value="{{ $rosterHariIni->custom_jam_pulang }}">
+                                    value="{{ $r1->custom_jam_pulang }}">
                                 <input type="hidden"
                                     name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_nama_shift]"
-                                    value="{{ $rosterHariIni->custom_nama_shift }}">
+                                    value="{{ $r1->custom_nama_shift }}">
                                 @else
                                 <input type="hidden" name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}]"
-                                    value="{{ $nilaiAwal }}">
+                                    value="{{ $r1->shift_id ?? '' }}">
                                 @endif
 
-                                <div class="roster-cell h-11 flex items-center justify-center text-[9px] font-extrabold cursor-pointer select-none {{ $bgClass }}"
-                                    data-shift="{{ $nilaiAwal }}" data-user="{{ $pegawai->id }}"
-                                    data-date="{{ $tanggalSekarang }}" @if($isCustom) data-custom="1" @endif
-                                    title="{{ $tooltipCell }}">
-                                    {{ $displayText }}
+                                {{-- Input sesi 2 (hanya jika ada) --}}
+                                @if($r2 && $r2->custom_jam_masuk)
+                                <input type="hidden"
+                                    name="roster2[{{ $pegawai->id }}][{{ $tanggalSekarang }}][shift_id]" value="">
+                                <input type="hidden"
+                                    name="roster2[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_jam_masuk]"
+                                    value="{{ $r2->custom_jam_masuk }}">
+                                <input type="hidden"
+                                    name="roster2[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_jam_pulang]"
+                                    value="{{ $r2->custom_jam_pulang }}">
+                                <input type="hidden"
+                                    name="roster2[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_nama_shift]"
+                                    value="{{ $r2->custom_nama_shift }}">
+                                @elseif($r2)
+                                <input type="hidden" name="roster2[{{ $pegawai->id }}][{{ $tanggalSekarang }}]"
+                                    value="{{ $r2->shift_id }}">
+                                @endif
+
+                                <div class="roster-cell h-11 flex flex-col items-center justify-center text-[9px] font-extrabold cursor-pointer select-none {{ $cls1 }}"
+                                    data-user="{{ $pegawai->id }}" data-date="{{ $tanggalSekarang }}"
+                                    data-shift="{{ $r1->shift_id ?? '' }}"
+                                    data-custom="{{ $r1 && $r1->custom_jam_masuk ? 1 : 0 }}"
+                                    data-c1-masuk="{{ $r1->custom_jam_masuk }}"
+                                    data-c1-pulang="{{ $r1->custom_jam_pulang }}"
+                                    data-c1-nama="{{ $r1->custom_nama_shift }}" data-shift2="{{ $r2->shift_id ?? '' }}"
+                                    data-custom2="{{ $r2 && $r2->custom_jam_masuk ? 1 : 0 }}"
+                                    data-c2-masuk="{{ $r2->custom_jam_masuk }}"
+                                    data-c2-pulang="{{ $r2->custom_jam_pulang }}"
+                                    data-c2-nama="{{ $r2->custom_nama_shift }}"
+                                    title="{{ $pegawai->name }} — {{ $tanggalSekarang }}{{ $t1 ? ' • S1: ' . $t1 : '' }}{{ $t2 ? ' • S2: ' . $t2 : '' }}">
+                                    <span class="line1 leading-tight">{{ $t1 ?? '—' }}</span>
+                                    @if($t2)
+                                    <span class="line2 leading-tight text-[8px] opacity-80">②{{ $t2 }}</span>
+                                    @endif
                                 </div>
                             </td>
                             @endfor
@@ -348,6 +381,7 @@ $shiftMap[(string) $s->id] = [
 
         let activeShift = '';
         let painting = false;
+        let activeSesi = '1';
         let customActive = false;
         let customData = null;
 
@@ -395,6 +429,22 @@ $shiftMap[(string) $s->id] = [
             });
         });
 
+        // ---------- Toggle SESI 1 / 2 ----------
+        const sesiBtns = document.querySelectorAll('.sesi-btn');
+        sesiBtns.forEach(function (b) {
+            b.addEventListener('click', function () {
+                activeSesi = b.dataset.sesi;
+                sesiBtns.forEach(function (x) {
+                    x.className = 'sesi-btn px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 ' +
+                        (x.dataset.sesi === activeSesi ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-100');
+                });
+                if (infoBox) {
+                    infoBox.classList.remove('hidden');
+                    infoBox.innerHTML = '✍️ Mode cat: <b>SESI ' + activeSesi + '</b> — klik / geser sel untuk mengisi jadwal sesi ini.';
+                }
+            });
+        });
+
         if (chips.length > 0) { setActiveShift(chips[0].dataset.shift); } else { setActiveShift(''); }
 
         // ---------- Helper: kelola hidden input per sel ----------
@@ -406,48 +456,118 @@ $shiftMap[(string) $s->id] = [
             parent.appendChild(input);
         }
 
-        function setCellInputs(cell, mode, payload) {
+        // ---------- Baca info satu sesi dari dataset sel ----------
+        function readSesi(cell, sesi) {
+            const suf = (sesi === 1) ? '' : '2';
+            const key = cell.dataset['shift' + suf] ?? '';
+            const isCst = cell.dataset['custom' + suf] === '1';
+
+            if (isCst) {
+                const m = cell.dataset['c' + sesi + 'Masuk'];
+                const p = cell.dataset['c' + sesi + 'Pulang'];
+                if (!m) return null;
+                return { text: m.slice(0, 5) + '–' + p.slice(0, 5), cls: 'bg-purple-100 text-purple-700' };
+            }
+            if (key === '') return null;
+            const info = SHIFT_MAP[key];
+            return info ? { text: info.jam || info.label, cls: info.cls } : null;
+        }
+
+        // ---------- Gambar ulang isi sel (2 baris) ----------
+        function renderCell(cell) {
+            const s1 = readSesi(cell, 1);
+            const s2 = readSesi(cell, 2);
+
+            const l2old = cell.querySelector('.line2');
+            if (l2old) l2old.remove();
+
+            let l1 = cell.querySelector('.line1');
+            if (!l1) {
+                l1 = document.createElement('span');
+                l1.className = 'line1 leading-tight';
+                cell.appendChild(l1);
+            }
+            l1.textContent = s1 ? s1.text : (s2 ? s2.text : '—');
+
+            if (s1 && s2) {
+                const sp = document.createElement('span');
+                sp.className = 'line2 leading-tight text-[8px] opacity-80';
+                sp.textContent = '②' + s2.text;
+                cell.appendChild(sp);
+            }
+
+            // Warna sel mengikuti sesi 1 (atau sesi 2 bila sesi 1 kosong)
+            ALL_CELL_CLASSES.forEach(function (c) { cell.classList.remove(c); });
+            const base = s1 || s2;
+            if (base) {
+                base.cls.split(' ').forEach(function (c) { cell.classList.add(c); });
+            } else {
+                SHIFT_MAP[''].cls.split(' ').forEach(function (c) { cell.classList.add(c); });
+            }
+        }
+
+        // ---------- Sinkronkan hidden input (roster & roster2) dari dataset ----------
+        function syncInputs(cell) {
             const parent = cell.parentElement;
-            const userId = cell.dataset.user;
+            const uid = cell.dataset.user;
             const date = cell.dataset.date;
 
             parent.querySelectorAll('input[type="hidden"]').forEach(function (i) { i.remove(); });
 
-            if (mode === 'custom') {
-                addHidden(parent, 'roster[' + userId + '][' + date + '][shift_id]', '');
-                addHidden(parent, 'roster[' + userId + '][' + date + '][custom_jam_masuk]', payload.jam_masuk);
-                addHidden(parent, 'roster[' + userId + '][' + date + '][custom_jam_pulang]', payload.jam_pulang);
-                addHidden(parent, 'roster[' + userId + '][' + date + '][custom_nama_shift]', payload.nama);
+            // Sesi 1
+            if (cell.dataset.custom === '1' && cell.dataset.c1Masuk) {
+                addHidden(parent, 'roster[' + uid + '][' + date + '][shift_id]', '');
+                addHidden(parent, 'roster[' + uid + '][' + date + '][custom_jam_masuk]', cell.dataset.c1Masuk);
+                addHidden(parent, 'roster[' + uid + '][' + date + '][custom_jam_pulang]', cell.dataset.c1Pulang);
+                addHidden(parent, 'roster[' + uid + '][' + date + '][custom_nama_shift]', cell.dataset.c1Nama || '');
             } else {
-                addHidden(parent, 'roster[' + userId + '][' + date + ']', payload.shiftId);
+                addHidden(parent, 'roster[' + uid + '][' + date + ']', cell.dataset.shift || '');
+            }
+
+            // Sesi 2 (hanya bila terisi)
+            if (cell.dataset.custom2 === '1' && cell.dataset.c2Masuk) {
+                addHidden(parent, 'roster2[' + uid + '][' + date + '][shift_id]', '');
+                addHidden(parent, 'roster2[' + uid + '][' + date + '][custom_jam_masuk]', cell.dataset.c2Masuk);
+                addHidden(parent, 'roster2[' + uid + '][' + date + '][custom_jam_pulang]', cell.dataset.c2Pulang);
+                addHidden(parent, 'roster2[' + uid + '][' + date + '][custom_nama_shift]', cell.dataset.c2Nama || '');
+            } else if (cell.dataset.shift2 && cell.dataset.shift2 !== '') {
+                addHidden(parent, 'roster2[' + uid + '][' + date + ']', cell.dataset.shift2);
             }
         }
 
-        // ---------- Fungsi mengecat sel (support shift palet & custom) ----------
+        // ---------- Cat sel pada SESI yang sedang aktif ----------
         function styleCell(cell, shiftId) {
-            // Mode CUSTOM aktif
+            const suf = (activeSesi === '1') ? '' : '2';
+
             if (customActive && customData) {
-                ALL_CELL_CLASSES.forEach(function (c) { cell.classList.remove(c); });
-                cell.classList.add('bg-purple-100', 'text-purple-700');
-                cell.dataset.shift = '';
-                cell.dataset.custom = '1';
-                cell.textContent = customData.jam_masuk + '–' + customData.jam_pulang;
-                setCellInputs(cell, 'custom', customData);
-                return;
+                cell.dataset['shift' + suf] = '';
+                cell.dataset['custom' + suf] = '1';
+                cell.dataset['c' + activeSesi + 'Masuk'] = customData.jam_masuk;
+                cell.dataset['c' + activeSesi + 'Pulang'] = customData.jam_pulang;
+                cell.dataset['c' + activeSesi + 'Nama'] = customData.nama;
+            } else {
+                const key = (shiftId === '' || shiftId === null || shiftId === undefined) ? '' : String(shiftId);
+                cell.dataset['shift' + suf] = key;
+                cell.dataset['custom' + suf] = '0';
+                if (activeSesi === '1') {
+                    delete cell.dataset.c1Masuk; delete cell.dataset.c1Pulang; delete cell.dataset.c1Nama;
+                } else {
+                    delete cell.dataset.c2Masuk; delete cell.dataset.c2Pulang; delete cell.dataset.c2Nama;
+                }
             }
 
-            // Mode NORMAL (palet shift)
-            const key = (shiftId === '' || shiftId === null || shiftId === undefined) ? '' : String(shiftId);
-            const info = SHIFT_MAP[key] || SHIFT_MAP[''];
+            syncInputs(cell);
+            renderCell(cell);
+        }
 
-            ALL_CELL_CLASSES.forEach(function (c) { cell.classList.remove(c); });
-            info.cls.split(' ').forEach(function (c) { cell.classList.add(c); });
-
-            cell.dataset.shift = key;
-            delete cell.dataset.custom;
-            cell.textContent = key === '' ? '—' : (info.jam || info.label);
-
-            setCellInputs(cell, 'normal', { shiftId: key });
+        // ---------- Kosongkan SELURUH sel (kedua sesi) ----------
+        function resetCell(cell) {
+            cell.dataset.shift = ''; cell.dataset.custom = '0';
+            cell.dataset.shift2 = ''; cell.dataset.custom2 = '0';
+            delete cell.dataset.c1Masuk; delete cell.dataset.c1Pulang; delete cell.dataset.c1Nama;
+            delete cell.dataset.c2Masuk; delete cell.dataset.c2Pulang; delete cell.dataset.c2Nama;
+            syncInputs(cell);
+            renderCell(cell);
         }
 
         // ---------- Interaksi klik & drag (paint) ----------
@@ -495,7 +615,7 @@ $shiftMap[(string) $s->id] = [
             });
             if (!conf.isConfirmed) return;
             resetCustom();
-            document.querySelectorAll('.roster-cell').forEach(function (cell) { styleCell(cell, ''); });
+            document.querySelectorAll('.roster-cell').forEach(function (cell) { resetCell(cell); });
         });
 
         // ---------- Salin bulan lalu ----------

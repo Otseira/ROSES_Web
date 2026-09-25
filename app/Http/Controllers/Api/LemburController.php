@@ -14,7 +14,7 @@ class LemburController extends Controller
 {
     /**
      * LEMBUR EKSTENSI SHIFT — 1x tekan: akhiri jam dinas + catat lembur.
-     * ✅ Wajib dalam radius • foto disalin sebagai foto pulang.
+     * ✅ Berlaku untuk sesi TERAKHIR hari ini.
      */
     public function storeEkstensi(Request $request)
     {
@@ -39,30 +39,32 @@ class LemburController extends Controller
             return response()->json(['success' => false, 'message' => 'Anda sudah mengajukan lembur ekstensi untuk hari ini.'], 422);
         }
 
-        // ✅ BARU: sudah absen pulang hari ini → lembur tambahan hanya lewat On-Call
-        $sudahPulang = LogAbsensi::where('user_id', $user->id)
-            ->whereDate('waktu_masuk', $today)
-            ->whereNotNull('waktu_pulang')
-            ->exists();
-
-        if ($sudahPulang) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Anda sudah absen pulang hari ini. Untuk tugas tambahan setelah pulang, gunakan menu On-Call.',
-            ], 422);
-        }
-
-        // Ambil roster hari ini
-        $roster = JadwalRoster::with('shift')
+        // ✅ Ambil SEMUA sesi hari ini
+        $rostersHariIni = JadwalRoster::with('shift')
             ->where('user_id', $user->id)
             ->where('tanggal_dinas', $today)
-            ->first();
-        if (!$roster) {
+            ->orderBy('sesi')
+            ->get();
+
+        if ($rostersHariIni->isEmpty()) {
             return response()->json(['success' => false, 'message' => 'Jadwal dinas tidak ditemukan. Gunakan On-Call untuk hari libur.'], 422);
         }
 
-        // Hitung jam pulang shift (handle shift malam)
-        $shift = $roster->shift;
+        // ✅ Cek apakah masih ada sesi yang BELUM selesai
+        foreach ($rostersHariIni as $r) {
+            $logAbsen = LogAbsensi::where('roster_id', $r->id)->first();
+            if (!$logAbsen || $logAbsen->waktu_pulang === null) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Masih ada sesi dinas yang belum selesai. Ekstensi shift hanya bisa dilakukan setelah SEMUA sesi hari ini selesai.',
+                ], 422);
+            }
+        }
+
+        // ✅ Ambil SESI TERAKHIR sebagai acuan jam pulang
+        $roster = $rostersHariIni->last();
+        $shift  = $roster->shift;
+
         $jamPulangShift = Carbon::parse($today . ' ' . $shift->jam_pulang);
         if (Carbon::parse($shift->jam_pulang)->lessThan(Carbon::parse($shift->jam_masuk))) {
             $jamPulangShift->addDay();
@@ -71,11 +73,11 @@ class LemburController extends Controller
         if ($now->lessThan($jamPulangShift)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Lembur ekstensi hanya bisa diajukan setelah jam pulang shift (' . $jamPulangShift->format('H:i') . ').',
+                'message' => 'Lembur ekstensi hanya bisa diajukan setelah jam pulang sesi terakhir (' . $jamPulangShift->format('H:i') . ').',
             ], 422);
         }
 
-        // Range terkunci: 1 s/d (sekarang − akhir shift)
+        // Range terkunci: 1 s/d (sekarang − akhir sesi terakhir)
         $maxMenit    = intdiv($now->getTimestamp() - $jamPulangShift->getTimestamp(), 60);
         $durasiMenit = $request->filled('durasi_menit') ? (int) $request->durasi_menit : $maxMenit;
 
@@ -85,7 +87,7 @@ class LemburController extends Controller
         if ($durasiMenit > $maxMenit) {
             return response()->json([
                 'success' => false,
-                'message' => "Durasi melebihi batas. Maksimal {$maxMenit} menit (dari akhir shift {$shift->jam_pulang} s/d sekarang).",
+                'message' => "Durasi melebihi batas. Maksimal {$maxMenit} menit (dari akhir sesi terakhir {$shift->jam_pulang} s/d sekarang).",
             ], 422);
         }
 
@@ -97,16 +99,16 @@ class LemburController extends Controller
         $file = $request->file('foto_masuk');
         $path = $file->storeAs('lembur_masuk', 'lembur_' . ($user->nik ?? $user->id) . '_' . time() . '.' . $file->extension(), 'public');
 
-        // ✅ AUTO CLOCK-OUT + foto lembur menjadi foto pulang
         $waktuSelesai = $now;
         $waktuMulai   = $now->copy()->subMinutes($durasiMenit);
         $totalJam     = round($durasiMenit / 60, 2);
 
+        // Auto clock-out sesi terakhir (jika belum)
         $logAbsen = LogAbsensi::where('roster_id', $roster->id)->first();
         $autoClockOut = false;
         if ($logAbsen && $logAbsen->waktu_pulang === null) {
             $logAbsen->waktu_pulang      = $now;
-            $logAbsen->foto_pulang       = $path; // ✅ foto lembur = foto pulang
+            $logAbsen->foto_pulang       = $path;
             $logAbsen->latitude_pulang   = $request->latitude;
             $logAbsen->longitude_pulang  = $request->longitude;
             $logAbsen->save();
@@ -128,14 +130,13 @@ class LemburController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => ($autoClockOut ? '✓ Absen pulang tercatat otomatis. ' : '') . '✓ Lembur ekstensi berhasil disimpan.',
+            'message' => ($autoClockOut ? '✓ Absen pulang sesi terakhir tercatat otomatis. ' : '') . '✓ Lembur ekstensi berhasil disimpan.',
             'data'    => $this->normalizeLembur($lembur->load('user.unitKerja')),
         ], 200);
     }
 
     /**
-     * ON-CALL MASUK — seperti absen masuk (foto & GPS tersendiri).
-     * ✅ Wajib dalam radius (kebijakan seragam).
+     * ON-CALL MASUK — hanya boleh setelah SEMUA sesi hari ini selesai.
      */
     public function clockInOnCall(Request $request)
     {
@@ -148,6 +149,7 @@ class LemburController extends Controller
 
         $user = $request->user()->load('unitKerja');
         $now  = Carbon::now();
+        $today = $now->toDateString();
 
         // Cegah sesi ganda
         $aktif = LogLembur::where('user_id', $user->id)
@@ -161,25 +163,30 @@ class LemburController extends Controller
             ], 422);
         }
 
-        // ✅ LOGIKA BARU: On-Call hanya boleh jika:
-        //    a) Belum ada absen masuk hari ini (hari libur / tanpa jadwal), ATAU
-        //    b) Sudah absen masuk DAN sudah absen pulang (setelah jam dinas selesai)
-        $logAbsenHariIni = LogAbsensi::where('user_id', $user->id)
-            ->whereDate('waktu_masuk', $now->toDateString())
-            ->latest('waktu_masuk')
-            ->first();
+        // ✅ Ambil SEMUA sesi hari ini
+        $rostersHariIni = JadwalRoster::where('user_id', $user->id)
+            ->where('tanggal_dinas', $today)
+            ->orderBy('sesi')
+            ->get();
 
-        if ($logAbsenHariIni) {
-            // Sudah ada absen masuk — cek apakah sudah absen pulang
-            if ($logAbsenHariIni->waktu_pulang === null) {
+        // ✅ Cek apakah masih ada sesi yang belum selesai
+        foreach ($rostersHariIni as $r) {
+            $logAbsen = LogAbsensi::where('roster_id', $r->id)->first();
+            if (!$logAbsen || $logAbsen->waktu_pulang === null) {
+                // Cek apakah sesi ini belum dibuka jendela waktunya
+                [$winStart,] = AbsensiController::jendelaSesi($r);
+                if ($now->lt($winStart)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Masih ada sesi dinas berikutnya yang akan dimulai. On-Call hanya bisa dilakukan setelah SEMUA sesi hari ini selesai.',
+                    ], 422);
+                }
                 return response()->json([
                     'success' => false,
-                    'message' => 'On-Call tidak bisa dimulai saat jam dinas masih aktif. Gunakan "Ekstensi Shift" untuk menambah waktu kerja, atau lakukan Absen Pulang terlebih dahulu.',
+                    'message' => 'Masih ada sesi dinas yang aktif. Gunakan "Ekstensi Shift" untuk menambah waktu kerja, atau lakukan Absen Pulang terlebih dahulu.',
                 ], 422);
             }
         }
-        // Jika $logAbsenHariIni null → boleh on-call (hari libur / tanpa jadwal)
-        // Jika $logAbsenHariIni tidak null DAN sudah absen pulang → boleh on-call (setelah jam dinas)
 
         // ✅ CEK RADIUS (seragam, dinamis dari Pengaturan Sistem)
         $cekRadius = $this->verifikasiRadius($request, 'On-Call masuk');
@@ -210,8 +217,7 @@ class LemburController extends Controller
     }
 
     /**
-     * ON-CALL KELUAR — akhiri sesi + durasi otomatis + auto clock-out.
-     * ✅ Wajib dalam radius (kebijakan seragam).
+     * ON-CALL KELUAR — akhiri sesi + durasi otomatis + auto clock-out sesi terakhir (jika perlu).
      */
     public function clockOutOnCall(Request $request)
     {
@@ -253,15 +259,19 @@ class LemburController extends Controller
         $file = $request->file('foto_keluar');
         $path = $file->storeAs('oncall_keluar', 'oncall_keluar_' . ($user->nik ?? $user->id) . '_' . time() . '.' . $file->extension(), 'public');
 
-        // ✅ AUTO CLOCK-OUT + foto on-call keluar menjadi foto pulang (jika belum ada)
+        // ✅ AUTO CLOCK-OUT sesi terakhir (jika belum ada)
         $today  = $now->toDateString();
-        $roster = JadwalRoster::where('user_id', $user->id)->where('tanggal_dinas', $today)->first();
+        $rosterTerakhir = JadwalRoster::where('user_id', $user->id)
+            ->where('tanggal_dinas', $today)
+            ->orderBy('sesi', 'desc')
+            ->first();
+
         $autoClockOut = false;
-        if ($roster) {
-            $logAbsen = LogAbsensi::where('roster_id', $roster->id)->whereNull('waktu_pulang')->first();
+        if ($rosterTerakhir) {
+            $logAbsen = LogAbsensi::where('roster_id', $rosterTerakhir->id)->whereNull('waktu_pulang')->first();
             if ($logAbsen) {
                 $logAbsen->waktu_pulang      = $now;
-                $logAbsen->foto_pulang       = $path; // ✅ foto on-call keluar = foto pulang
+                $logAbsen->foto_pulang       = $path;
                 $logAbsen->latitude_pulang   = $request->latitude;
                 $logAbsen->longitude_pulang  = $request->longitude;
                 $logAbsen->save();
@@ -300,19 +310,28 @@ class LemburController extends Controller
         ], 200);
     }
 
-    /** Info shift hari ini (untuk default durasi ekstensi). */
+    /** Info shift hari ini (untuk default durasi ekstensi) — ambil SESI TERAKHIR. */
     public function infoShiftHariIni(Request $request)
     {
         $user  = $request->user();
         $today = now()->toDateString();
 
+        // ✅ Ambil sesi terakhir hari ini
         $roster = JadwalRoster::with('shift')
             ->where('user_id', $user->id)
             ->where('tanggal_dinas', $today)
+            ->orderBy('sesi', 'desc')
             ->first();
 
         if (!$roster) {
-            return response()->json(['success' => true, 'data' => null], 200);
+            $roster = $this->cariRosterShiftMalamAktif($user->id, now());
+        }
+
+        if (!$roster || !$roster->shift) {
+            return response()->json([
+                'success' => true,
+                'data'    => null,
+            ], 200);
         }
 
         $jamPulang = Carbon::parse($today . ' ' . $roster->shift->jam_pulang);
@@ -328,6 +347,7 @@ class LemburController extends Controller
                 'jam_masuk'  => $roster->shift->jam_masuk,
                 'jam_pulang' => $roster->shift->jam_pulang,
                 'max_menit'  => max(0, $maxMenit),
+                'sesi'       => $roster->sesi,
             ],
         ], 200);
     }
@@ -425,16 +445,12 @@ class LemburController extends Controller
     // HELPER
     // ===================================================================
 
-    /**
-     * ✅ CEK RADIUS DINAMIS — nilai selalu dibaca live dari Pengaturan Sistem.
-     * Berlaku seragam: ekstensi shift, on-call masuk, on-call keluar.
-     */
     private function verifikasiRadius(Request $request, string $label = 'Absensi')
     {
         $pengaturan = PengaturanAplikasi::first();
 
         if (!$pengaturan || !$pengaturan->latitude || !$pengaturan->longitude) {
-            return true; // GPS kantor belum diatur → jangan mengunci
+            return true;
         }
 
         $jarak = $this->calculateDistance(
@@ -458,7 +474,6 @@ class LemburController extends Controller
         return true;
     }
 
-    /** Baca radius — tahan terhadap perbedaan nama kolom di tabel pengaturan. */
     private function getMaxRadius($pengaturan): int
     {
         if (!$pengaturan) return 100;
@@ -472,7 +487,6 @@ class LemburController extends Controller
         return 100;
     }
 
-    /** Payload lembur dinormalisasi — semua key yang dibaca aplikasi Flutter. */
     private function normalizeLembur($l): array
     {
         $user = $l->user;
@@ -492,7 +506,6 @@ class LemburController extends Controller
         }
 
         return array_merge($l->toArray(), [
-            // Key persis yang dibaca validasi_lembur_screen.dart
             'pegawai_nama' => $nama,
             'pegawai_nik'  => $nik,
             'unit_nama'    => $unitNama,
@@ -501,7 +514,6 @@ class LemburController extends Controller
             'lat_keluar'   => $l->latitude_keluar  !== null ? (float) $l->latitude_keluar  : null,
             'lng_keluar'   => $l->longitude_keluar !== null ? (float) $l->longitude_keluar : null,
 
-            // Alias cadangan
             'nama'          => $nama,
             'nama_karyawan' => $nama,
             'nama_pegawai'  => $nama,
@@ -509,25 +521,21 @@ class LemburController extends Controller
             'unit_kerja'    => $unitNama,
             'nama_unit'     => $unitNama,
 
-            // Waktu
             'waktu_mulai'   => $mulai?->format('Y-m-d H:i'),
             'waktu_selesai' => $selesai?->format('Y-m-d H:i'),
             'jam_mulai'     => $mulai?->format('H:i'),
             'jam_selesai'   => $selesai?->format('H:i'),
             'tanggal'       => $mulai?->format('d/m/Y'),
 
-            // Durasi & status
             'total_jam'  => $l->total_jam_lembur,
             'durasi_jam' => $l->total_jam_lembur,
             'status'     => $l->status_validasi,
 
-            // URL foto
             'foto'            => $l->foto_masuk ? url('storage/' . $l->foto_masuk) : null,
             'foto_masuk_url'  => $l->foto_masuk ? url('storage/' . $l->foto_masuk) : null,
             'foto_keluar_url' => $l->foto_keluar ? url('storage/' . $l->foto_keluar) : null,
             'foto_profil'     => $fotoProfil,
 
-            // Objek user lengkap
             'user' => $user ? [
                 'id'          => $user->id,
                 'name'        => $user->name,
@@ -549,5 +557,20 @@ class LemburController extends Controller
         $dLon = deg2rad($lon2 - $lon1);
         $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2) ** 2;
         return $R * 2 * atan2(sqrt($a), sqrt(1 - $a));
+    }
+
+    private function cariRosterShiftMalamAktif(int $userId, Carbon $now): ?JadwalRoster
+    {
+        $kemarin = $now->copy()->subDay()->toDateString();
+
+        $roster = JadwalRoster::with('shift')
+            ->where('user_id', $userId)
+            ->where('tanggal_dinas', $kemarin)
+            ->orderBy('sesi', 'desc')
+            ->first();
+
+        if (!$roster || !$roster->shift) return null;
+
+        return ($roster->shift->jam_pulang < $roster->shift->jam_masuk) ? $roster : null;
     }
 }

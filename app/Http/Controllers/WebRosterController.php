@@ -71,66 +71,110 @@ class WebRosterController extends Controller
     public function bulkStore(Request $request)
     {
         try {
-            $rosterData = $request->input('roster');
+            $rosterData1 = $request->input('roster', []);
+            $rosterData2 = $request->input('roster2', []);
 
-            if (!$rosterData) {
+            if (!$rosterData1 && !$rosterData2) {
                 return response()->json(['success' => false, 'message' => 'Tidak ada data jadwal yang dikirim.']);
             }
 
             $userLogin = $request->user();
             $allowed   = $this->allowedUnitIds($userLogin);
 
-            $validUserIds = User::whereIn('id', array_keys($rosterData))
+            // Kumpulkan entri: [userId][tanggal][sesi] = payload
+            $entries = [];
+            foreach ([1 => $rosterData1, 2 => $rosterData2] as $sesi => $data) {
+                foreach ($data as $userId => $dates) {
+                    foreach ($dates as $tanggal => $payload) {
+                        $shiftId      = is_array($payload) ? ($payload['shift_id'] ?? null) : $payload;
+                        $customMasuk  = is_array($payload) ? ($payload['custom_jam_masuk'] ?? null) : null;
+                        $customPulang = is_array($payload) ? ($payload['custom_jam_pulang'] ?? null) : null;
+                        $customNama   = is_array($payload) ? ($payload['custom_nama_shift'] ?? null) : null;
+
+                        $entries[$userId][$tanggal][$sesi] = compact('shiftId', 'customMasuk', 'customPulang', 'customNama');
+                    }
+                }
+            }
+
+            $validUserIds = User::whereIn('id', array_keys($entries))
                 ->when($allowed !== null, fn($q) => $q->whereIn('unit_kerja_id', $allowed))
                 ->pluck('id')
                 ->toArray();
 
-            $countShift  = 0;
-            $countAbsen  = 0;
-
-            foreach ($rosterData as $userId => $dates) {
+            // ✅ VALIDASI ANTI-TUMPUK antar sesi
+            foreach ($entries as $userId => $dates) {
                 if (!in_array($userId, $validUserIds)) continue;
 
-                foreach ($dates as $tanggal => $data) {
-                    // Handle both old format (simple shift_id) and new format (array with custom)
-                    $shiftId = is_array($data) ? ($data['shift_id'] ?? null) : $data;
-                    $customMasuk = is_array($data) ? ($data['custom_jam_masuk'] ?? null) : null;
-                    $customPulang = is_array($data) ? ($data['custom_jam_pulang'] ?? null) : null;
-                    $customNama = is_array($data) ? ($data['custom_nama_shift'] ?? null) : null;
+                foreach ($dates as $tanggal => $sesiMap) {
+                    if (!isset($sesiMap[1], $sesiMap[2])) continue;
 
-                    // Jika semua kosong → hapus roster
-                    if (empty($shiftId) && empty($customMasuk)) {
-                        JadwalRoster::where('user_id', $userId)
-                            ->where('tanggal_dinas', $tanggal)
-                            ->delete();
+                    $t1 = $this->waktuSesiDariInput($sesiMap[1]);
+                    $t2 = $this->waktuSesiDariInput($sesiMap[2]);
 
-                        $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, null);
-                        continue;
+                    if (!$t1 || !$t2) continue;
+
+                    // Sesi 1 lintas tengah malam → sesi 2 di tanggal sama tidak masuk akal
+                    if ($t1[1] <= $t1[0]) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Sesi 1 pada ' . $tanggal . ' lintas tengah malam, sehingga tidak bisa ada sesi 2 di tanggal yang sama.',
+                        ], 422);
                     }
 
-                    // Jika ada custom → shift_id = null (custom override)
-                    if (!empty($customMasuk)) {
-                        $shiftId = null;
+                    if ($t2[0] < $t1[1]) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Jadwal tumpang tindih pada ' . $tanggal . ': sesi 2 mulai sebelum sesi 1 selesai.',
+                        ], 422);
                     }
+                }
+            }
 
-                    $roster = JadwalRoster::updateOrCreate(
-                        ['user_id' => $userId, 'tanggal_dinas' => $tanggal],
-                        [
-                            'shift_id' => $shiftId,
-                            'custom_jam_masuk' => $customMasuk,
-                            'custom_jam_pulang' => $customPulang,
-                            'custom_nama_shift' => $customNama,
-                        ]
-                    );
-                    $countShift++;
+            // ✅ SIMPAN per sesi
+            $countShift = 0;
+            $countAbsen = 0;
 
-                    $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, $roster);
+            foreach ($entries as $userId => $dates) {
+                if (!in_array($userId, $validUserIds)) continue;
+
+                foreach ($dates as $tanggal => $sesiMap) {
+                    foreach ([1, 2] as $sesi) {
+                        $d = $sesiMap[$sesi] ?? null;
+                        if ($d === null) continue;
+
+                        $kosong = empty($d['shiftId']) && empty($d['customMasuk']);
+
+                        if ($kosong) {
+                            JadwalRoster::where('user_id', $userId)
+                                ->where('tanggal_dinas', $tanggal)
+                                ->where('sesi', $sesi)
+                                ->delete();
+
+                            $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, null);
+                            continue;
+                        }
+
+                        $shiftId = empty($d['customMasuk']) ? $d['shiftId'] : null;
+
+                        $roster = JadwalRoster::updateOrCreate(
+                            ['user_id' => $userId, 'tanggal_dinas' => $tanggal, 'sesi' => $sesi],
+                            [
+                                'shift_id'          => $shiftId,
+                                'custom_jam_masuk'  => $d['customMasuk'],
+                                'custom_jam_pulang' => $d['customPulang'],
+                                'custom_nama_shift' => $d['customNama'],
+                            ]
+                        );
+                        $countShift++;
+
+                        $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, $roster);
+                    }
                 }
             }
 
             return response()->json([
                 'success' => true,
-                'message' => "Jadwal disimpan ({$countShift} shift). {$countAbsen} absensi otomatis disesuaikan dengan jadwal terbaru.",
+                'message' => "Jadwal disimpan ({$countShift} sesi). {$countAbsen} absensi otomatis disesuaikan dengan jadwal terbaru.",
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -138,6 +182,19 @@ class WebRosterController extends Controller
                 'message' => 'Terjadi kesalahan sistem: ' . $e->getMessage(),
             ]);
         }
+    }
+
+    /** Ambil [jamMasuk, jamPulang] dari payload input (custom atau shift). */
+    private function waktuSesiDariInput(array $d): ?array
+    {
+        if (!empty($d['customMasuk']) && !empty($d['customPulang'])) {
+            return [$d['customMasuk'], $d['customPulang']];
+        }
+        if (!empty($d['shiftId'])) {
+            $s = \App\Models\MasterShift::find($d['shiftId']);
+            if ($s) return [(string) $s->jam_masuk, (string) $s->jam_pulang];
+        }
+        return null;
     }
 
     /**
@@ -176,9 +233,17 @@ class WebRosterController extends Controller
             $tanggalBaru = sprintf('%04d-%02d-%02d', $tahun, $bulan, $day);
 
             $roster = JadwalRoster::updateOrCreate(
-                ['user_id' => $r->user_id, 'tanggal_dinas' => $tanggalBaru],
-                ['shift_id' => $r->shift_id]
+                ['user_id' => $r->user_id, 'tanggal_dinas' => $tanggalBaru, 'sesi' => $r->sesi],
+                [
+                    'shift_id'          => $r->shift_id,
+                    'custom_jam_masuk'  => $r->custom_jam_masuk,
+                    'custom_jam_pulang' => $r->custom_jam_pulang,
+                    'custom_nama_shift' => $r->custom_nama_shift,
+                ]
             );
+
+            $this->sinkronkanAbsensi((int) $r->user_id, $tanggalBaru, $roster);
+            $count++;
 
             $this->sinkronkanAbsensi((int) $r->user_id, $tanggalBaru, $roster);
             $count++;
@@ -196,29 +261,41 @@ class WebRosterController extends Controller
      */
     private function sinkronkanAbsensi(int $userId, string $tanggal, ?JadwalRoster $roster): int
     {
-        $start = Carbon::parse($tanggal)->startOfDay();
-        $end   = Carbon::parse($tanggal)->endOfDay();
-
-        // Shift malam (overnight): jendela absen masuk s/d jam pulang besoknya
         if ($roster) {
-            $jamMasuk = $roster->custom_jam_masuk ?? ($roster->shift ? (string) $roster->shift->jam_masuk : null);
-            $jamPulang = $roster->custom_jam_pulang ?? ($roster->shift ? (string) $roster->shift->jam_pulang : null);
-
-            if ($jamMasuk && $jamPulang && $jamPulang < $jamMasuk) {
-                $start = Carbon::parse($tanggal . ' ' . $jamMasuk)
-                    ->subMinutes(AbsensiController::MASUK_CEPAT_MAKS_MENIT);
-                $end = Carbon::parse($tanggal)->addDay()->setTimeFromTimeString($jamPulang);
-            }
+            [$start, $end] = \App\Http\Controllers\Api\AbsensiController::jendelaSesi($roster);
+        } else {
+            $start = Carbon::parse($tanggal)->startOfDay();
+            $end   = Carbon::parse($tanggal)->endOfDay();
         }
 
         $logs = LogAbsensi::where('user_id', $userId)
             ->whereBetween('waktu_masuk', [$start, $end])
             ->get();
 
+        // Sesi lain yang masih ada di tanggal itu (untuk melindungi log-nya)
+        $sesiLain = JadwalRoster::with('shift')
+            ->where('user_id', $userId)
+            ->where('tanggal_dinas', $tanggal)
+            ->when($roster, fn($q) => $q->where('id', '!=', $roster->id))
+            ->get();
+
         foreach ($logs as $log) {
+            // Jangan lepaskan log yang jatuh di jendela sesi lain
+            if (!$roster) {
+                $diSesiLain = false;
+                foreach ($sesiLain as $o) {
+                    [$ws, $we] = \App\Http\Controllers\Api\AbsensiController::jendelaSesi($o);
+                    if ($log->waktu_masuk->gte($ws) && $log->waktu_masuk->lte($we)) {
+                        $diSesiLain = true;
+                        break;
+                    }
+                }
+                if ($diSesiLain) continue;
+            }
+
             $log->roster_id = $roster?->id;
             $log->save();
-            AbsensiController::recalculateStatus($log);
+            \App\Http\Controllers\Api\AbsensiController::recalculateStatus($log);
         }
 
         return $logs->count();

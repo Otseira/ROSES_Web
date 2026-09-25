@@ -186,7 +186,8 @@ class RosterController extends Controller
             ->where('user_id', $user->id)
             ->whereBetween('tanggal_dinas', [$start->toDateString(), $end->toDateString()])
             ->get()
-            ->keyBy(fn($r) => (int) \Carbon\Carbon::parse($r->tanggal_dinas)->day);
+            ->groupBy(fn($r) => (int) \Carbon\Carbon::parse($r->tanggal_dinas)->day);
+
 
         $lemburs = LogLembur::where('user_id', $user->id)
             ->where('status_validasi', 'Disetujui')
@@ -210,23 +211,39 @@ class RosterController extends Controller
 
         $hari = [];
         for ($d = 1; $d <= $jumlahHari; $d++) {
-            $r   = $rosters[$d] ?? null;
-            $log = $r?->logAbsensi;
-            $shiftNama = $r?->shift?->nama_shift;
+            $list = $rosters[$d] ?? collect();
+            $r1   = $list->firstWhere('sesi', 1);
+            $r2   = $list->firstWhere('sesi', 2);
+
+            $log1 = $r1?->logAbsensi;
+            $log2 = $r2?->logAbsensi;
+
+            $shiftNama = $r1?->shift?->nama_shift;
             $low = strtolower(trim((string) $shiftNama));
-            $libur = ($r === null) || str_contains($low, 'libur') || $low === 'off';
+            $libur = ($r1 === null && $r2 === null) || str_contains($low, 'libur') || $low === 'off';
+
+            $jam = fn($r, $kolom) => $r ? substr((string) ($r->{'custom_jam_' . $kolom} ?? $r->shift?->{'jam_' . $kolom} ?? ''), 0, 5) : null;
 
             $hari[] = [
-                'tanggal'        => $d,
-                'is_libur'       => $libur,
-                'nama_shift'     => $shiftNama,
-                'jam_masuk'      => $libur ? null : substr((string) ($r->shift->jam_masuk ?? ''), 0, 5),
-                'jam_keluar'     => $libur ? null : substr((string) ($r->shift->jam_pulang ?? ''), 0, 5),
-                'absen_masuk'    => $log?->waktu_masuk  ? $fmtHm($log->waktu_masuk)  : null,
-                'absen_pulang'   => $log?->waktu_pulang ? $fmtHm($log->waktu_pulang) : null,
-                'terlambat_menit' => (int) ($log?->menit_terlambat ?? 0),
-                'lembur_masuk'   => $masukByDay[$d] ?? null,
-                'lembur_keluar'  => $keluarByDay[$d] ?? null,
+                'tanggal'         => $d,
+                'is_libur'        => $libur,
+                'nama_shift'      => $shiftNama,
+                'jam_masuk'       => $libur ? null : $jam($r1, 'masuk'),
+                'jam_keluar'      => $libur ? null : $jam($r1, 'pulang'),
+                'absen_masuk'     => $log1?->waktu_masuk  ? $fmtHm($log1->waktu_masuk)  : null,
+                'absen_pulang'    => $log1?->waktu_pulang ? $fmtHm($log1->waktu_pulang) : null,
+                'terlambat_menit' => (int) ($log1?->menit_terlambat ?? 0),
+                'lembur_masuk'    => $masukByDay[$d] ?? null,
+                'lembur_keluar'   => $keluarByDay[$d] ?? null,
+                // ✅ SESI 2 (field tambahan; aplikasi lama tetap aman)
+                'sesi2' => $r2 ? [
+                    'nama_shift'      => $r2->shift?->nama_shift,
+                    'jam_masuk'       => $jam($r2, 'masuk'),
+                    'jam_keluar'      => $jam($r2, 'pulang'),
+                    'absen_masuk'     => $log2?->waktu_masuk  ? $fmtHm($log2->waktu_masuk)  : null,
+                    'absen_pulang'    => $log2?->waktu_pulang ? $fmtHm($log2->waktu_pulang) : null,
+                    'terlambat_menit' => (int) ($log2?->menit_terlambat ?? 0),
+                ] : null,
             ];
         }
 

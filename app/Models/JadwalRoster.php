@@ -13,6 +13,7 @@ class JadwalRoster extends Model
     protected $fillable = [
         'user_id',
         'tanggal_dinas',
+        'sesi',
         'shift_id',
         'custom_jam_masuk',
         'custom_jam_pulang',
