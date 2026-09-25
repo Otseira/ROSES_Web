@@ -266,17 +266,17 @@ $shiftMap[(string) $s->id] = [
 
                                 <div class="roster-cell h-11 flex flex-col items-center justify-center text-[9px] font-extrabold cursor-pointer select-none {{ $cls1 }}"
                                     data-user="{{ $pegawai->id }}" data-date="{{ $tanggalSekarang }}"
-                                    data-shift="{{ $r1->shift_id ?? '' }}"
+                                    data-shift="{{ $r1?->shift_id ?? '' }}"
                                     data-custom="{{ $r1 && $r1->custom_jam_masuk ? 1 : 0 }}"
-                                    data-c1-masuk="{{ $r1->custom_jam_masuk }}"
-                                    data-c1-pulang="{{ $r1->custom_jam_pulang }}"
-                                    data-c1-nama="{{ $r1->custom_nama_shift }}" data-shift2="{{ $r2->shift_id ?? '' }}"
+                                    data-c1-masuk="{{ $r1?->custom_jam_masuk }}"
+                                    data-c1-pulang="{{ $r1?->custom_jam_pulang }}"
+                                    data-c1-nama="{{ $r1?->custom_nama_shift }}"
+                                    data-shift2="{{ $r2?->shift_id ?? '' }}"
                                     data-custom2="{{ $r2 && $r2->custom_jam_masuk ? 1 : 0 }}"
-                                    data-c2-masuk="{{ $r2->custom_jam_masuk }}"
-                                    data-c2-pulang="{{ $r2->custom_jam_pulang }}"
-                                    data-c2-nama="{{ $r2->custom_nama_shift }}"
-                                    title="{{ $pegawai->name }} — {{ $tanggalSekarang }}{{ $t1 ? ' • S1: ' . $t1 : '' }}{{ $t2 ? ' • S2: ' . $t2 : '' }}">
-                                    <span class="line1 leading-tight">{{ $t1 ?? '—' }}</span>
+                                    data-c2-masuk="{{ $r2?->custom_jam_masuk }}"
+                                    data-c2-pulang="{{ $r2?->custom_jam_pulang }}"
+                                    data-c2-nama="{{ $r2?->custom_nama_shift }}" <span class="line1 leading-tight">{{
+                                    $t1 ?? '—' }}</span>
                                     @if($t2)
                                     <span class="line2 leading-tight text-[8px] opacity-80">②{{ $t2 }}</span>
                                     @endif
