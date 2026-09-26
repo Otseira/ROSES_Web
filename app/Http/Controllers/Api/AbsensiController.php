@@ -56,35 +56,22 @@ class AbsensiController extends Controller
         // 3) Cari sesi TARGET: jendela waktunya memuat sekarang & belum dipakai absen
         $target = null;
         foreach ($rostersHariIni as $r) {
-            [$winStart, $winEnd] = self::jendelaSesi($r);
-            if ($now->gte($winStart) && $now->lte($winEnd)) {
-                $sudahDipakai = LogAbsensi::where('roster_id', $r->id)
-                    ->whereNotNull('waktu_masuk')
-                    ->exists();
-                if (!$sudahDipakai) {
-                    $target = $r;
-                    break;
-                }
+            $sudahDipakai = LogAbsensi::where('roster_id', $r->id)
+                ->whereNotNull('waktu_masuk')
+                ->exists();
+            if ($sudahDipakai) continue;
+
+            [, $winEnd] = self::jendelaSesi($r);
+
+            // Sesi masih valid selama belum melewati jam pulang
+            if ($now->lte($winEnd)) {
+                $target = $r;
+                break;
             }
         }
 
-        // 4) Jika tidak ada target → tentukan alasan penolakan / jalur Tanpa Jadwal
+        // 4) Jika tidak ada target → semua sesi sudah selesai atau tidak ada jadwal
         if (!$target) {
-            // a) Ada sesi berikutnya yang BELUM dibuka jendela waktunya
-            $sisa = $rostersHariIni->first(function ($r) use ($now) {
-                [$ws,] = self::jendelaSesi($r);
-                return $now->lt($ws)
-                    && !LogAbsensi::where('roster_id', $r->id)->whereNotNull('waktu_masuk')->exists();
-            });
-
-            if ($sisa) {
-                [$ws,] = self::jendelaSesi($sisa);
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Absen masuk untuk sesi berikutnya belum dibuka. Sesi dimulai pukul '
-                        . $ws->addMinutes(self::MASUK_CEPAT_MAKS_MENIT)->format('H:i') . '.',
-                ], 422);
-            }
 
             // b) Semua sesi hari ini sudah selesai → arahkan ke On-Call
             $logSelesaiHariIni = LogAbsensi::where('user_id', $user->id)
