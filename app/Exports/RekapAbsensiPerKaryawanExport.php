@@ -2,13 +2,11 @@
 
 namespace App\Exports;
 
-use Maatwebsite\Excel\Concerns\Exportable;
+use Maatwebsite\Excel\Concerns\Export as ExcelExport;
 use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 
-class RekapAbsensiPerKaryawanExport implements WithMultipleSheets
+class RekapAbsensiPerKaryawanExport implements ExcelExport, WithMultipleSheets
 {
-    use Exportable;
-
     private array $sheetsData;
     private string $periodLabel;
 
@@ -20,14 +18,14 @@ class RekapAbsensiPerKaryawanExport implements WithMultipleSheets
 
     public function sheets(): array
     {
-        // Pengaman jika tidak ada data
+        // Pengaman jika periode tidak ada data
         if (empty($this->sheetsData)) {
             return [
                 new RekapKaryawanSheet(
                     'Tidak Ada Data',
                     [
-                        'nama' => '-',
-                        'unit' => '-',
+                        'nama'    => '-',
+                        'unit'    => '-',
                         'summary' => $this->emptySummary(),
                     ],
                     [
@@ -74,7 +72,10 @@ class RekapAbsensiPerKaryawanExport implements WithMultipleSheets
     }
 
     /**
-     * Sanitasi nama sheet: max 31 karakter, tidak ada karakter terlarang, harus unik.
+     * Nama sheet Excel:
+     * - Maksimal 31 karakter
+     * - Tidak boleh mengandung: \ / ? * [ ] :
+     * - Harus unik
      */
     private function sanitizeTitle(string $name, array $used): string
     {
