@@ -76,6 +76,12 @@ class WebLaporanController extends Controller
         ));
     }
 
+    /**
+     * ✅ EXPORT EXCEL — Multi-sheet per karyawan dengan:
+     *    - Total lembur & on-call
+     *    - Breakdown keterlambatan per kategori potongan
+     *    - Total potongan otomatis
+     */
     public function exportExcel(Request $request)
     {
         $unit       = $request->input('unit');
@@ -90,12 +96,12 @@ class WebLaporanController extends Controller
         }
 
         [$startDate, $endDate] = $this->resolveDateRange($tglMulai, $tglSelesai);
-        [$logs, $lemburs] = $this->buildData($startDate, $endDate, $unit, $allowedUnitIds);
+        [$logs, $lemburs]      = $this->buildData($startDate, $endDate, $unit, $allowedUnitIds);
 
         $periodLabel = Carbon::parse($startDate)->translatedFormat('d M Y')
             . ' s/d ' . Carbon::parse($endDate)->translatedFormat('d M Y');
 
-        // ===== ✅ KELOMPOKKAN ABSENSI PER KARYAWAN (Untuk Multi-Sheet) =====
+        // ===== Kelompokkan absensi per karyawan =====
         $grouped = $logs->groupBy(function ($log) {
             $user = $log->user ?? $log->roster?->user;
             return $user?->id ?? ('log-' . $log->id);
@@ -105,6 +111,16 @@ class WebLaporanController extends Controller
         foreach ($grouped as $userId => $groupLogs) {
             $first = $groupLogs->first();
             $user  = $first->user ?? $first->roster?->user;
+
+            // === Hitung summary per karyawan ===
+            $totalLemburMenit    = 0;
+            $totalOncallMenit    = 0;
+            $totalTerlambatMenit = 0;
+
+            $terlambat6_10   = 0;   // potongan 25%
+            $terlambat11_15  = 0;   // potongan 50%
+            $terlambat16_20  = 0;   // potongan 100%
+            $terlambat21plus = 0;   // perlu tindak lanjut
 
             $rows = [];
             foreach ($groupLogs as $log) {
@@ -116,9 +132,29 @@ class WebLaporanController extends Controller
                 if ($items) {
                     foreach ($items as $l) {
                         $mnt  = (float) ($l->total_jam_lembur ?? 0) * 60;
-                        $norm = str_contains(strtolower(str_replace(['-', ' ', '_'], '', $l->jenis_lembur ?? '')), 'oncall');
+                        $norm = str_contains(
+                            strtolower(str_replace(['-', ' ', '_'], '', $l->jenis_lembur ?? '')),
+                            'oncall'
+                        );
                         $norm ? $mOncall += $mnt : $mLembur += $mnt;
                     }
+                }
+
+                $totalLemburMenit += $mLembur;
+                $totalOncallMenit += $mOncall;
+
+                // ===== Kategorikan keterlambatan =====
+                $mntTerlambat = (int) ($log->menit_terlambat ?? 0);
+                $totalTerlambatMenit += $mntTerlambat;
+
+                if ($mntTerlambat >= 6 && $mntTerlambat <= 10) {
+                    $terlambat6_10 += $mntTerlambat;
+                } elseif ($mntTerlambat >= 11 && $mntTerlambat <= 15) {
+                    $terlambat11_15 += $mntTerlambat;
+                } elseif ($mntTerlambat >= 16 && $mntTerlambat <= 20) {
+                    $terlambat16_20 += $mntTerlambat;
+                } elseif ($mntTerlambat > 20) {
+                    $terlambat21plus += $mntTerlambat;
                 }
 
                 $rows[] = [
@@ -126,32 +162,50 @@ class WebLaporanController extends Controller
                     optional($log->waktu_masuk)->format('H:i') ?? '-',
                     optional($log->waktu_pulang)->format('H:i') ?? '-',
                     $log->durasi_kerja ?? '-',
-                    $log->status_kehadiran,
-                    (int) ($log->menit_terlambat ?? 0),
+                    $log->status_kehadiran ?? '-',
+                    $mntTerlambat,
                     $log->jarak ?? '-',
                     (int) round($mLembur),
                     (int) round($mOncall),
                 ];
             }
 
+            // ===== Hitung potongan =====
+            $potongan6_10  = (int) round($terlambat6_10 * 0.25);
+            $potongan11_15 = (int) round($terlambat11_15 * 0.50);
+            $potongan16_20 = $terlambat16_20;  // 100%
+            $totalPotongan = $potongan6_10 + $potongan11_15 + $potongan16_20 + $terlambat21plus;
+
             $sheetsData[] = [
                 'nama' => $user?->name ?? 'Tanpa Nama',
                 'unit' => $user?->unitKerja?->nama_unit ?? '-',
                 'rows' => $rows,
+                'summary' => [
+                    'total_lembur_menit'    => (int) round($totalLemburMenit),
+                    'total_oncall_menit'    => (int) round($totalOncallMenit),
+                    'total_terlambat_menit' => $totalTerlambatMenit,
+                    'terlambat_6_10'        => $terlambat6_10,
+                    'terlambat_11_15'       => $terlambat11_15,
+                    'terlambat_16_20'       => $terlambat16_20,
+                    'terlambat_21plus'      => $terlambat21plus,
+                    'potongan_6_10'         => $potongan6_10,
+                    'potongan_11_15'        => $potongan11_15,
+                    'potongan_16_20'        => $potongan16_20,
+                    'total_potongan'        => $totalPotongan,
+                ],
             ];
         }
 
         // Urutkan sheet sesuai abjad nama
         usort($sheetsData, fn($a, $b) => strcasecmp($a['nama'], $b['nama']));
 
-        // ✅ EKSTENSI .xls (bukan .xlsx)
         $filename = 'rekap-absensi-'
             . Carbon::parse($startDate)->format('Y-m-d') . '-'
             . Carbon::parse($endDate)->format('Y-m-d') . '.xls';
 
-        // ✅ WRITER Xls (BIFF8) — TIDAK butuh extension zip
+        // Format XLS (BIFF8) — tidak butuh extension zip
         return Excel::download(
-            new \App\Exports\RekapAbsensiPerKaryawanExport($sheetsData, $periodLabel),   // ✅ huruf besar
+            new \App\Exports\RekapAbsensiPerKaryawanExport($sheetsData, $periodLabel),
             $filename,
             \Maatwebsite\Excel\Excel::XLS
         );

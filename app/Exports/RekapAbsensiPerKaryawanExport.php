@@ -2,11 +2,13 @@
 
 namespace App\Exports;
 
-use Maatwebsite\Excel\Concerns\Export as ExcelExport;
+use Maatwebsite\Excel\Concerns\Exportable;
 use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 
-class RekapAbsensiPerKaryawanExport implements ExcelExport, WithMultipleSheets
+class RekapAbsensiPerKaryawanExport implements WithMultipleSheets
 {
+    use Exportable;
+
     private array $sheetsData;
     private string $periodLabel;
 
@@ -18,7 +20,7 @@ class RekapAbsensiPerKaryawanExport implements ExcelExport, WithMultipleSheets
 
     public function sheets(): array
     {
-        // Pengaman jika periode tidak ada data
+        // Pengaman jika tidak ada data
         if (empty($this->sheetsData)) {
             return [
                 new RekapKaryawanSheet(
@@ -26,6 +28,7 @@ class RekapAbsensiPerKaryawanExport implements ExcelExport, WithMultipleSheets
                     [
                         'nama' => '-',
                         'unit' => '-',
+                        'summary' => $this->emptySummary(),
                     ],
                     [
                         ['Tidak ada data absensi pada periode yang dipilih.'],
@@ -53,11 +56,25 @@ class RekapAbsensiPerKaryawanExport implements ExcelExport, WithMultipleSheets
         return $sheets;
     }
 
+    private function emptySummary(): array
+    {
+        return [
+            'total_lembur_menit'    => 0,
+            'total_oncall_menit'    => 0,
+            'total_terlambat_menit' => 0,
+            'terlambat_6_10'        => 0,
+            'terlambat_11_15'       => 0,
+            'terlambat_16_20'       => 0,
+            'terlambat_21plus'      => 0,
+            'potongan_6_10'         => 0,
+            'potongan_11_15'        => 0,
+            'potongan_16_20'        => 0,
+            'total_potongan'        => 0,
+        ];
+    }
+
     /**
-     * Nama sheet Excel:
-     * - Maksimal 31 karakter
-     * - Tidak boleh mengandung: \ / ? * [ ] :
-     * - Harus unik
+     * Sanitasi nama sheet: max 31 karakter, tidak ada karakter terlarang, harus unik.
      */
     private function sanitizeTitle(string $name, array $used): string
     {
