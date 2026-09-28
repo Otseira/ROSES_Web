@@ -4,9 +4,9 @@ namespace App\Exports;
 
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
+use Maatwebsite\Excel\Concerns\WithColumnWidths;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use Maatwebsite\Excel\Concerns\WithTitle;
-use Maatwebsite\Excel\Concerns\WithColumnWidths;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
@@ -32,28 +32,24 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
         return $this->title;
     }
 
-    /**
-     * ✅ Lebar kolom MINIMAL (fallback bila auto-size tidak cukup).
-     *    Auto-size akan menambah lebar jika konten lebih panjang.
-     */
+    /** Lebar minimal kolom (auto-size tetap aktif bila konten lebih panjang). */
     public function columnWidths(): array
     {
         return [
-            'A' => 20,  // Tanggal / Label
-            'B' => 14,  // Jam Masuk / Nilai
-            'C' => 14,  // Jam Keluar
+            'A' => 14,  // Tanggal
+            'B' => 12,  // Jam Masuk
+            'C' => 12,  // Jam Keluar
             'D' => 14,  // Durasi
-            'E' => 16,  // Status
-            'F' => 16,  // Terlambat
-            'G' => 12,  // Jarak
-            'H' => 14,  // Lembur
-            'I' => 14,  // On-Call
+            'E' => 16,  // Terlambat
+            'F' => 12,  // Jarak
+            'G' => 14,  // Lembur
+            'H' => 14,  // On-Call
         ];
     }
 
     public function array(): array
     {
-        $pad = fn(array $r): array => array_slice(array_pad($r, 9, ''), 0, 9);
+        $pad = fn(array $r): array => array_slice(array_pad($r, 8, ''), 0, 8);
 
         $rows = [];
 
@@ -64,39 +60,43 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
         $rows[] = $pad(['Periode', $this->periodLabel]);
         $rows[] = $pad([]);
 
-        // ===== HEADER TABEL HARIAN =====
+        // ===== HEADER TABEL — ✅ TANPA kolom Status =====
         $rows[] = $pad([
             'Tanggal',
             'Jam Masuk',
             'Jam Keluar',
             'Durasi (mnt)',
-            'Status',
             'Terlambat (mnt)',
             'Jarak (m)',
             'Lembur (mnt)',
             'On-Call (mnt)',
         ]);
 
-        // ===== DATA HARIAN =====
-        foreach ($this->rows as $row) {
-            $rows[] = $pad($row);
+        // ===== DATA HARIAN — ✅ kolom Status (index 4) dibuang =====
+        foreach ($this->rows as $r) {
+            $rows[] = $pad([
+                $r[0] ?? '-',   // tanggal
+                $r[1] ?? '-',   // jam masuk
+                $r[2] ?? '-',   // jam keluar
+                $r[3] ?? '-',   // durasi
+                $r[5] ?? 0,     // terlambat (mnt)
+                $r[6] ?? '-',   // jarak
+                $r[7] ?? 0,     // lembur
+                $r[8] ?? 0,     // on-call
+            ]);
         }
 
         $rows[] = $pad([]);
 
-        // ===== RINGKASAN =====
+        // ===== RINGKASAN (tetap seperti sebelumnya) =====
         $s = $this->meta['summary'] ?? [];
-        $totalLembur    = (int) ($s['total_lembur_menit'] ?? 0);
-        $totalOnCall    = (int) ($s['total_oncall_menit'] ?? 0);
-        $totalTerlambat = (int) ($s['total_terlambat_menit'] ?? 0);
-
         $rows[] = $pad(['RINGKASAN TOTAL']);
-        $rows[] = $pad(['Total Lembur', $totalLembur . ' menit (' . round($totalLembur / 60, 2) . ' jam)']);
-        $rows[] = $pad(['Total On-Call', $totalOnCall . ' menit (' . round($totalOnCall / 60, 2) . ' jam)']);
-        $rows[] = $pad(['Total Keterlambatan', $totalTerlambat . ' menit']);
+        $rows[] = $pad(['Total Lembur', ((int) ($s['total_lembur_menit'] ?? 0)) . ' menit (' . round(($s['total_lembur_menit'] ?? 0) / 60, 2) . ' jam)']);
+        $rows[] = $pad(['Total On-Call', ((int) ($s['total_oncall_menit'] ?? 0)) . ' menit (' . round(($s['total_oncall_menit'] ?? 0) / 60, 2) . ' jam)']);
+        $rows[] = $pad(['Total Keterlambatan', ((int) ($s['total_terlambat_menit'] ?? 0)) . ' menit']);
         $rows[] = $pad([]);
 
-        // ===== BREAKDOWN KETERLAMBATAN =====
+        // ===== BREAKDOWN (tetap seperti sebelumnya — berbasis menit) =====
         $rows[] = $pad(['BREAKDOWN KETERLAMBATAN (PERATURAN POTONGAN)']);
         $rows[] = $pad(['Kategori', 'Total Menit', 'Persentase', 'Potongan (mnt)']);
         $rows[] = $pad(['Terlambat 6 - 10 menit',  (int) ($s['terlambat_6_10'] ?? 0),  '25%',  (int) ($s['potongan_6_10'] ?? 0)]);
@@ -109,7 +109,7 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
         }
 
         $rows[] = $pad([]);
-        $rows[] = $pad(['TOTAL POTONGAN', (int) ($s['total_potongan'] ?? 0) . ' menit']);
+        $rows[] = $pad(['TOTAL POTONGAN', '', '', ((int) ($s['total_potongan'] ?? 0)) . ' menit']);
 
         return $rows;
     }
@@ -117,9 +117,9 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
     public function styles(Worksheet $sheet): array
     {
         $data = $this->array();
-        $cols = range('A', 'I');
+        $cols = range('A', 'H');   // ✅ kini 8 kolom
 
-        // ===== Cari posisi section =====
+        // ===== Posisi section =====
         $ringkasanRow = $breakdownRow = $totalPotonganRow = null;
         foreach ($data as $i => $row) {
             $v = $row[0] ?? null;
@@ -128,7 +128,7 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
             if ($v === 'TOTAL POTONGAN') $totalPotonganRow = $i + 1;
         }
 
-        // ===== 1. BANNER JUDUL (hijau tua) =====
+        // ===== 1. BANNER JUDUL =====
         foreach ($cols as $col) {
             $sheet->getStyle($col . '1')->applyFromArray([
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1B5E20']],
@@ -140,7 +140,7 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
         ]);
         $sheet->getRowDimension(1)->setRowHeight(28);
 
-        // ===== 2. IDENTITAS (hijau muda, kolom A & B) =====
+        // ===== 2. IDENTITAS =====
         for ($r = 2; $r <= 4; $r++) {
             $sheet->getStyle("A{$r}")->applyFromArray([
                 'font'    => ['bold' => true],
@@ -153,7 +153,7 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
             ]);
         }
 
-        // ===== 3. HEADER TABEL (hijau) =====
+        // ===== 3. HEADER TABEL (8 kolom) =====
         foreach ($cols as $col) {
             $sheet->getStyle($col . '6')->applyFromArray([
                 'font'      => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
@@ -164,29 +164,36 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
         }
         $sheet->getRowDimension(6)->setRowHeight(22);
 
-        // ===== 4. DATA HARIAN: border + zebra =====
+        // ===== 4. DATA HARIAN — ✅ BARIS MERAH bila terlambat, POLOS bila tepat waktu =====
         $n = count($this->rows);
         if ($n > 0) {
             $start = 7;
             $end   = 6 + $n;
 
-            $sheet->getStyle("A{$start}:I{$end}")->applyFromArray([
+            // Border tipis semua baris (struktur tabel)
+            $sheet->getStyle("A{$start}:H{$end}")->applyFromArray([
                 'borders'   => $this->thinBorder(),
                 'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
             ]);
 
+            // Warnai per baris berdasarkan kolom Terlambat (index 4)
             for ($r = $start; $r <= $end; $r++) {
-                if (($r - $start) % 2 === 1) {
+                $telat = (int) ($data[$r - 1][4] ?? 0);
+
+                if ($telat > 0) {
+                    // ✅ TERLAMBAT → satu baris penuh merah
                     foreach ($cols as $col) {
-                        $sheet->getStyle($col . $r)->getFill()
-                            ->setFillType(Fill::FILL_SOLID)
-                            ->getStartColor()->setRGB('F1F8E9');
+                        $sheet->getStyle($col . $r)->applyFromArray([
+                            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FADBD8']],
+                            'font' => ['bold' => true, 'color' => ['rgb' => 'B71C1C']],
+                        ]);
                     }
                 }
+                // ✅ TEPAT WAKTU / lainnya → polos, tanpa tanda apa pun
             }
         }
 
-        // ===== 5. RINGKASAN (banner oranye + 3 baris) =====
+        // ===== 5. RINGKASAN =====
         if ($ringkasanRow) {
             foreach ($cols as $col) {
                 $sheet->getStyle($col . $ringkasanRow)->applyFromArray([
@@ -211,9 +218,9 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
             }
         }
 
-        // ===== 6. BREAKDOWN (banner merah + header + baris warna) =====
+        // ===== 6. BREAKDOWN (4 kolom, seperti sebelumnya) =====
         if ($breakdownRow) {
-            foreach ($cols as $col) {
+            foreach (['A', 'B', 'C', 'D'] as $col) {
                 $sheet->getStyle($col . $breakdownRow)->applyFromArray([
                     'font' => ['bold' => true, 'size' => 12, 'color' => ['rgb' => 'FFFFFF']],
                     'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'C62828']],
@@ -252,25 +259,18 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
             }
         }
 
-        // ===== 7. TOTAL POTONGAN (merah tua) =====
+        // ===== 7. TOTAL POTONGAN =====
         if ($totalPotonganRow) {
-            $sheet->getStyle("A{$totalPotonganRow}")->applyFromArray([
-                'font'    => ['bold' => true, 'size' => 11, 'color' => ['rgb' => 'FFFFFF']],
-                'fill'    => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'B71C1C']],
-                'borders' => $this->mediumBorder(),
-            ]);
-            $sheet->getStyle("B{$totalPotonganRow}")->applyFromArray([
-                'font'      => ['bold' => true, 'size' => 11, 'color' => ['rgb' => 'FFFFFF']],
-                'fill'      => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'B71C1C']],
-                'borders'   => $this->mediumBorder(),
-                'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
-            ]);
+            foreach (['A', 'D'] as $col) {
+                $sheet->getStyle($col . $totalPotonganRow)->applyFromArray([
+                    'font'    => ['bold' => true, 'size' => 11, 'color' => ['rgb' => 'FFFFFF']],
+                    'fill'    => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'B71C1C']],
+                    'borders' => $this->mediumBorder(),
+                ]);
+            }
+            $sheet->getStyle("A{$totalPotonganRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
+            $sheet->getStyle("D{$totalPotonganRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getRowDimension($totalPotonganRow)->setRowHeight(22);
-        }
-
-        // ===== 8. Padding & margin kolom =====
-        foreach ($cols as $col) {
-            $sheet->getStyle($col)->getAlignment()->setWrapText(false);
         }
 
         return [];
