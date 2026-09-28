@@ -3,14 +3,16 @@
 namespace App\Exports;
 
 use Maatwebsite\Excel\Concerns\FromArray;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use Maatwebsite\Excel\Concerns\WithTitle;
+use Maatwebsite\Excel\Concerns\WithColumnWidths;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle
+class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAutoSize, WithColumnWidths
 {
     private string $title;
     private array $meta;
@@ -31,10 +33,24 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle
     }
 
     /**
-     * ✅ KUNCI KERAPIAN: SETIAP BARIS PASTI 9 KOLOM (A–I).
-     *    Baris pendek diisi string kosong '' agar writer .xls
-     *    tidak menggeser pemetaan kolom.
+     * ✅ Lebar kolom MINIMAL (fallback bila auto-size tidak cukup).
+     *    Auto-size akan menambah lebar jika konten lebih panjang.
      */
+    public function columnWidths(): array
+    {
+        return [
+            'A' => 20,  // Tanggal / Label
+            'B' => 14,  // Jam Masuk / Nilai
+            'C' => 14,  // Jam Keluar
+            'D' => 14,  // Durasi
+            'E' => 16,  // Status
+            'F' => 16,  // Terlambat
+            'G' => 12,  // Jarak
+            'H' => 14,  // Lembur
+            'I' => 14,  // On-Call
+        ];
+    }
+
     public function array(): array
     {
         $pad = fn(array $r): array => array_slice(array_pad($r, 9, ''), 0, 9);
@@ -53,12 +69,12 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle
             'Tanggal',
             'Jam Masuk',
             'Jam Keluar',
-            'Durasi',
+            'Durasi (mnt)',
             'Status',
-            'Terlambat',
-            'Jarak',
-            'Lembur',
-            'On-Call',
+            'Terlambat (mnt)',
+            'Jarak (m)',
+            'Lembur (mnt)',
+            'On-Call (mnt)',
         ]);
 
         // ===== DATA HARIAN =====
@@ -81,7 +97,7 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle
         $rows[] = $pad([]);
 
         // ===== BREAKDOWN KETERLAMBATAN =====
-        $rows[] = $pad(['BREAKDOWN KETERLAMBATAN']);
+        $rows[] = $pad(['BREAKDOWN KETERLAMBATAN (PERATURAN POTONGAN)']);
         $rows[] = $pad(['Kategori', 'Total Menit', 'Persentase', 'Potongan (mnt)']);
         $rows[] = $pad(['Terlambat 6 - 10 menit',  (int) ($s['terlambat_6_10'] ?? 0),  '25%',  (int) ($s['potongan_6_10'] ?? 0)]);
         $rows[] = $pad(['Terlambat 11 - 15 menit', (int) ($s['terlambat_11_15'] ?? 0), '50%',  (int) ($s['potongan_11_15'] ?? 0)]);
@@ -108,11 +124,11 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle
         foreach ($data as $i => $row) {
             $v = $row[0] ?? null;
             if ($v === 'RINGKASAN TOTAL') $ringkasanRow = $i + 1;
-            if ($v === 'BREAKDOWN KETERLAMBATAN') $breakdownRow = $i + 1;
+            if ($v === 'BREAKDOWN KETERLAMBATAN (PERATURAN POTONGAN)') $breakdownRow = $i + 1;
             if ($v === 'TOTAL POTONGAN') $totalPotonganRow = $i + 1;
         }
 
-        // ===== 1. BANNER JUDUL (hijau tua, per-sel A–I) =====
+        // ===== 1. BANNER JUDUL (hijau tua) =====
         foreach ($cols as $col) {
             $sheet->getStyle($col . '1')->applyFromArray([
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1B5E20']],
@@ -122,6 +138,7 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle
             'font'      => ['bold' => true, 'size' => 14, 'color' => ['rgb' => 'FFFFFF']],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER],
         ]);
+        $sheet->getRowDimension(1)->setRowHeight(28);
 
         // ===== 2. IDENTITAS (hijau muda, kolom A & B) =====
         for ($r = 2; $r <= 4; $r++) {
@@ -136,7 +153,7 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle
             ]);
         }
 
-        // ===== 3. HEADER TABEL (hijau, per-sel A–I) =====
+        // ===== 3. HEADER TABEL (hijau) =====
         foreach ($cols as $col) {
             $sheet->getStyle($col . '6')->applyFromArray([
                 'font'      => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
@@ -145,6 +162,7 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle
                 'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
             ]);
         }
+        $sheet->getRowDimension(6)->setRowHeight(22);
 
         // ===== 4. DATA HARIAN: border + zebra =====
         $n = count($this->rows);
@@ -177,6 +195,7 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle
                 ]);
             }
             $sheet->getStyle("A{$ringkasanRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
+            $sheet->getRowDimension($ringkasanRow)->setRowHeight(22);
 
             for ($i = 1; $i <= 3; $i++) {
                 $r = $ringkasanRow + $i;
@@ -201,6 +220,7 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle
                 ]);
             }
             $sheet->getStyle("A{$breakdownRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
+            $sheet->getRowDimension($breakdownRow)->setRowHeight(22);
 
             $h = $breakdownRow + 1;
             foreach (['A', 'B', 'C', 'D'] as $col) {
@@ -245,6 +265,12 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle
                 'borders'   => $this->mediumBorder(),
                 'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
             ]);
+            $sheet->getRowDimension($totalPotonganRow)->setRowHeight(22);
+        }
+
+        // ===== 8. Padding & margin kolom =====
+        foreach ($cols as $col) {
+            $sheet->getStyle($col)->getAlignment()->setWrapText(false);
         }
 
         return [];
