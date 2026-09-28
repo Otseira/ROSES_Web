@@ -99,9 +99,9 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
         // ===== BREAKDOWN (tetap seperti sebelumnya — berbasis menit) =====
         $rows[] = $pad(['BREAKDOWN KETERLAMBATAN (PERATURAN POTONGAN)']);
         $rows[] = $pad(['Kategori', 'Total Menit', 'Persentase', 'Potongan (mnt)']);
-        $rows[] = $pad(['Terlambat 6 - 10 menit',  (int) ($s['terlambat_6_10'] ?? 0),  '25%',  (int) ($s['potongan_6_10'] ?? 0)]);
-        $rows[] = $pad(['Terlambat 11 - 15 menit', (int) ($s['terlambat_11_15'] ?? 0), '50%',  (int) ($s['potongan_11_15'] ?? 0)]);
-        $rows[] = $pad(['Terlambat 16 - 20 menit', (int) ($s['terlambat_16_20'] ?? 0), '100%', (int) ($s['potongan_16_20'] ?? 0)]);
+        $rows[] = $pad(['Terlambat 6 - 10 menit',  (int) ($s['terlambat_6_10'] ?? 0),  '25%',]);
+        $rows[] = $pad(['Terlambat 11 - 15 menit', (int) ($s['terlambat_11_15'] ?? 0), '50%',]);
+        $rows[] = $pad(['Terlambat 16 - 20 menit', (int) ($s['terlambat_16_20'] ?? 0), '100%',]);
 
         $terlambat21plus = (int) ($s['terlambat_21plus'] ?? 0);
         if ($terlambat21plus > 0) {
