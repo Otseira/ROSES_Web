@@ -97,36 +97,35 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
         $rows[] = $pad([]);
 
         // ===== BREAKDOWN KETERLAMBATAN — 3 kategori + potongan Rupiah =====
-        $rows[] = $pad(['BREAKDOWN KETERLAMBATAN (PERATURAN POTONGAN)']);
-        $rows[] = $pad(['Kategori', 'Persentase', 'Total Menit', 'Potongan (Rupiah)']);
-
+        // ✅ Kolom ke-3 = JUMLAH KEJADIAN terlambat (frekuensi), BUKAN total menit
         $j1 = (int) ($s['jumlah_6_10'] ?? 0);
         $j2 = (int) ($s['jumlah_11_15'] ?? 0);
         $j3 = (int) ($s['jumlah_16plus'] ?? 0);
 
+        $rows[] = $pad(['BREAKDOWN KETERLAMBATAN (PERATURAN POTONGAN)']);
+        $rows[] = $pad(['Kategori', 'Persentase', 'Total Terlambat', 'Potongan (Rupiah)']);
+
         $rows[] = $pad([
-            'Terlambat 6 - 10 menit' . ($j1 > 1 ? " ({$j1}x)" : ''),
+            'Terlambat 6 - 10 menit',
             '25%',
-            (int) ($s['terlambat_6_10'] ?? 0),
+            $j1 . 'x',                       // ✅ frekuensi kejadian
             (int) ($s['rupiah_6_10'] ?? 0),
         ]);
         $rows[] = $pad([
-            'Terlambat 11 - 15 menit' . ($j2 > 1 ? " ({$j2}x)" : ''),
+            'Terlambat 11 - 15 menit',
             '50%',
-            (int) ($s['terlambat_11_15'] ?? 0),
+            $j2 . 'x',                       // ✅ frekuensi kejadian
             (int) ($s['rupiah_11_15'] ?? 0),
         ]);
         $rows[] = $pad([
-            'Terlambat ≥ 16 menit' . ($j3 > 1 ? " ({$j3}x)" : ''),
+            'Terlambat ≥ 16 menit',
             '100%',
-            (int) ($s['terlambat_16plus'] ?? 0),
+            $j3 . 'x',                       // ✅ frekuensi kejadian
             (int) ($s['rupiah_16plus'] ?? 0),
         ]);
 
         $rows[] = $pad([]);
         $rows[] = $pad(['TOTAL POTONGAN', '', '', (int) ($s['total_potongan_rupiah'] ?? 0)]);
-
-        return $rows;
 
         return $rows;
     }
@@ -235,7 +234,6 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
             }
         }
 
-        // ===== 6. BREAKDOWN (4 kolom, seperti sebelumnya) =====
         // ===== 6. BREAKDOWN (3 baris data + total) =====
         if ($breakdownRow) {
             // Banner header (hanya 4 kolom)
@@ -290,20 +288,6 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
             $sheet->getStyle("A{$totalPotonganRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
             $sheet->getStyle("D{$totalPotonganRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getStyle("D{$totalPotonganRow}")->getNumberFormat()->setFormatCode('"Rp" #,##0');
-            $sheet->getRowDimension($totalPotonganRow)->setRowHeight(22);
-        }
-
-        // ===== 7. TOTAL POTONGAN =====
-        if ($totalPotonganRow) {
-            foreach (['A', 'D'] as $col) {
-                $sheet->getStyle($col . $totalPotonganRow)->applyFromArray([
-                    'font'    => ['bold' => true, 'size' => 11, 'color' => ['rgb' => 'FFFFFF']],
-                    'fill'    => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'B71C1C']],
-                    'borders' => $this->mediumBorder(),
-                ]);
-            }
-            $sheet->getStyle("A{$totalPotonganRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
-            $sheet->getStyle("D{$totalPotonganRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getRowDimension($totalPotonganRow)->setRowHeight(22);
         }
 
