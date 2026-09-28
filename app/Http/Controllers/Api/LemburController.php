@@ -14,7 +14,7 @@ class LemburController extends Controller
 {
     /**
      * LEMBUR EKSTENSI SHIFT — 1x tekan: akhiri jam dinas + catat lembur.
-     * ✅ Berlaku untuk sesi TERAKHIR hari ini.
+     * ✅ Mendukung shift malam lintas hari & shift custom via rosterReferensiEkstensi.
      */
     public function storeEkstensi(Request $request)
     {
@@ -39,46 +39,48 @@ class LemburController extends Controller
             return response()->json(['success' => false, 'message' => 'Anda sudah mengajukan lembur ekstensi untuk hari ini.'], 422);
         }
 
-        // ✅ Ambil SEMUA sesi hari ini
-        $rostersHariIni = JadwalRoster::with('shift')
-            ->where('user_id', $user->id)
-            ->where('tanggal_dinas', $today)
-            ->orderBy('sesi')
-            ->get();
+        // ✅ Sesi aktif = belum absen pulang
+        $logAktif = LogAbsensi::where('user_id', $user->id)
+            ->whereNull('waktu_pulang')
+            ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
+            ->first();
 
-        if ($rostersHariIni->isEmpty()) {
-            return response()->json(['success' => false, 'message' => 'Jadwal dinas tidak ditemukan. Gunakan On-Call untuk hari libur.'], 422);
-        }
+        // ✅ Jika TIDAK ada sesi aktif dan hari ini sudah absen pulang → arahkan ke On-Call
+        if (!$logAktif) {
+            $sudahPulang = LogAbsensi::where('user_id', $user->id)
+                ->whereDate('waktu_masuk', $today)
+                ->whereNotNull('waktu_pulang')
+                ->exists();
 
-        // ✅ Cek apakah masih ada sesi yang BELUM selesai
-        foreach ($rostersHariIni as $r) {
-            $logAbsen = LogAbsensi::where('roster_id', $r->id)->first();
-            if (!$logAbsen || $logAbsen->waktu_pulang === null) {
+            if ($sudahPulang) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Masih ada sesi dinas yang belum selesai. Ekstensi shift hanya bisa dilakukan setelah SEMUA sesi hari ini selesai.',
+                    'message' => 'Anda sudah absen pulang hari ini. Untuk tugas tambahan setelah pulang, gunakan menu On-Call.',
                 ], 422);
             }
         }
 
-        // ✅ Ambil SESI TERAKHIR sebagai acuan jam pulang
-        $roster = $rostersHariIni->last();
-        $shift  = $roster->shift;
-
-        $jamPulangShift = Carbon::parse($today . ' ' . $shift->jam_pulang);
-        if (Carbon::parse($shift->jam_pulang)->lessThan(Carbon::parse($shift->jam_masuk))) {
-            $jamPulangShift->addDay();
-        }
-
-        if ($now->lessThan($jamPulangShift)) {
+        // ✅ SESI REFERENSI: cari lewat log absen (mendukung shift malam & custom)
+        $roster = $this->rosterReferensiEkstensi($user->id, $now, $logAktif);
+        if (!$roster) {
             return response()->json([
                 'success' => false,
-                'message' => 'Lembur ekstensi hanya bisa diajukan setelah jam pulang sesi terakhir (' . $jamPulangShift->format('H:i') . ').',
+                'message' => 'Jadwal dinas tidak ditemukan. Gunakan On-Call untuk hari libur.',
             ], 422);
         }
 
-        // Range terkunci: 1 s/d (sekarang − akhir sesi terakhir)
-        $maxMenit    = intdiv($now->getTimestamp() - $jamPulangShift->getTimestamp(), 60);
+        // ✅ Jam pulang = akhir jendela sesi (akurat untuk shift lintas tengah malam)
+        [, $winEnd] = \App\Http\Controllers\Api\AbsensiController::jendelaSesi($roster);
+
+        if ($now->lessThan($winEnd)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Lembur ekstensi hanya bisa diajukan setelah jam pulang jadwal (' . $winEnd->format('H:i') . ').',
+            ], 422);
+        }
+
+        // Range terkunci: 1 s/d (sekarang − akhir sesi referensi)
+        $maxMenit    = intdiv($now->getTimestamp() - $winEnd->getTimestamp(), 60);
         $durasiMenit = $request->filled('durasi_menit') ? (int) $request->durasi_menit : $maxMenit;
 
         if ($durasiMenit < 1) {
@@ -87,7 +89,7 @@ class LemburController extends Controller
         if ($durasiMenit > $maxMenit) {
             return response()->json([
                 'success' => false,
-                'message' => "Durasi melebihi batas. Maksimal {$maxMenit} menit (dari akhir sesi terakhir {$shift->jam_pulang} s/d sekarang).",
+                'message' => "Durasi melebihi batas. Maksimal {$maxMenit} menit (dari akhir sesi s/d sekarang).",
             ], 422);
         }
 
@@ -103,15 +105,14 @@ class LemburController extends Controller
         $waktuMulai   = $now->copy()->subMinutes($durasiMenit);
         $totalJam     = round($durasiMenit / 60, 2);
 
-        // Auto clock-out sesi terakhir (jika belum)
-        $logAbsen = LogAbsensi::where('roster_id', $roster->id)->first();
+        // ✅ AUTO CLOCK-OUT: tutup sesi yang masih aktif (apa pun roster-nya)
         $autoClockOut = false;
-        if ($logAbsen && $logAbsen->waktu_pulang === null) {
-            $logAbsen->waktu_pulang      = $now;
-            $logAbsen->foto_pulang       = $path;
-            $logAbsen->latitude_pulang   = $request->latitude;
-            $logAbsen->longitude_pulang  = $request->longitude;
-            $logAbsen->save();
+        if ($logAktif) {
+            $logAktif->waktu_pulang      = $now;
+            $logAktif->foto_pulang       = $path;
+            $logAktif->latitude_pulang   = $request->latitude;
+            $logAktif->longitude_pulang  = $request->longitude;
+            $logAktif->save();
             $autoClockOut = true;
         }
 
@@ -130,13 +131,14 @@ class LemburController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => ($autoClockOut ? '✓ Absen pulang sesi terakhir tercatat otomatis. ' : '') . '✓ Lembur ekstensi berhasil disimpan.',
+            'message' => ($autoClockOut ? '✓ Absen pulang tercatat otomatis. ' : '') . '✓ Lembur ekstensi berhasil disimpan.',
             'data'    => $this->normalizeLembur($lembur->load('user.unitKerja')),
         ], 200);
     }
 
     /**
-     * ON-CALL MASUK — hanya boleh setelah SEMUA sesi hari ini selesai.
+     * ON-CALL MASUK — hanya boleh setelah SEMUA sesi selesai.
+     * ✅ Mendukung shift malam lintas hari & shift custom via log absen.
      */
     public function clockInOnCall(Request $request)
     {
@@ -149,9 +151,8 @@ class LemburController extends Controller
 
         $user = $request->user()->load('unitKerja');
         $now  = Carbon::now();
-        $today = $now->toDateString();
 
-        // Cegah sesi ganda
+        // Cegah sesi ganda on-call
         $aktif = LogLembur::where('user_id', $user->id)
             ->where('jenis_lembur', 'On-Call')
             ->whereNull('waktu_selesai_lembur')
@@ -163,29 +164,18 @@ class LemburController extends Controller
             ], 422);
         }
 
-        // ✅ Ambil SEMUA sesi hari ini
-        $rostersHariIni = JadwalRoster::where('user_id', $user->id)
-            ->where('tanggal_dinas', $today)
-            ->orderBy('sesi')
-            ->get();
+        // ✅ Cek sesi dinas AKTIF (belum absen pulang) — via log absen saja
+        //    (lebih andal daripada cek roster tanggal hari ini)
+        $logAktif = LogAbsensi::where('user_id', $user->id)
+            ->whereNull('waktu_pulang')
+            ->where('waktu_masuk', '>=', $now->copy()->subHours(36))
+            ->first();
 
-        // ✅ Cek apakah masih ada sesi yang belum selesai
-        foreach ($rostersHariIni as $r) {
-            $logAbsen = LogAbsensi::where('roster_id', $r->id)->first();
-            if (!$logAbsen || $logAbsen->waktu_pulang === null) {
-                // Cek apakah sesi ini belum dibuka jendela waktunya
-                [$winStart,] = AbsensiController::jendelaSesi($r);
-                if ($now->lt($winStart)) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Masih ada sesi dinas berikutnya yang akan dimulai. On-Call hanya bisa dilakukan setelah SEMUA sesi hari ini selesai.',
-                    ], 422);
-                }
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Masih ada sesi dinas yang aktif. Gunakan "Ekstensi Shift" untuk menambah waktu kerja, atau lakukan Absen Pulang terlebih dahulu.',
-                ], 422);
-            }
+        if ($logAktif) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Masih ada sesi dinas yang aktif. Gunakan "Ekstensi Shift" untuk menambah waktu kerja, atau lakukan Absen Pulang terlebih dahulu.',
+            ], 422);
         }
 
         // ✅ CEK RADIUS (seragam, dinamis dari Pengaturan Sistem)
@@ -310,44 +300,36 @@ class LemburController extends Controller
         ], 200);
     }
 
-    /** Info shift hari ini (untuk default durasi ekstensi) — ambil SESI TERAKHIR. */
+    /** Info sesi referensi (untuk default durasi ekstensi) — akurat untuk shift malam & custom. */
     public function infoShiftHariIni(Request $request)
     {
-        $user  = $request->user();
-        $today = now()->toDateString();
+        $user = $request->user();
+        $now  = Carbon::now();
 
-        // ✅ Ambil sesi terakhir hari ini
-        $roster = JadwalRoster::with('shift')
-            ->where('user_id', $user->id)
-            ->where('tanggal_dinas', $today)
-            ->orderBy('sesi', 'desc')
+        $logAktif = LogAbsensi::where('user_id', $user->id)
+            ->whereNull('waktu_pulang')
+            ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
             ->first();
 
+        $roster = $this->rosterReferensiEkstensi($user->id, $now, $logAktif);
+
         if (!$roster) {
-            $roster = $this->cariRosterShiftMalamAktif($user->id, now());
+            return response()->json(['success' => true, 'data' => null], 200);
         }
 
-        if (!$roster || !$roster->shift) {
-            return response()->json([
-                'success' => true,
-                'data'    => null,
-            ], 200);
-        }
+        [, $winEnd] = \App\Http\Controllers\Api\AbsensiController::jendelaSesi($roster);
+        $maxMenit   = intdiv($now->getTimestamp() - $winEnd->getTimestamp(), 60);
 
-        $jamPulang = Carbon::parse($today . ' ' . $roster->shift->jam_pulang);
-        if (Carbon::parse($roster->shift->jam_pulang)->lessThan(Carbon::parse($roster->shift->jam_masuk))) {
-            $jamPulang->addDay();
-        }
-
-        $maxMenit = intdiv(now()->getTimestamp() - $jamPulang->getTimestamp(), 60);
+        $jamMasuk = $roster->custom_jam_masuk ?? ($roster->shift ? (string) $roster->shift->jam_masuk : null);
 
         return response()->json([
             'success' => true,
             'data'    => [
-                'jam_masuk'  => $roster->shift->jam_masuk,
-                'jam_pulang' => $roster->shift->jam_pulang,
+                'jam_masuk'  => $jamMasuk ? substr((string) $jamMasuk, 0, 5) : null,
+                'jam_pulang' => $winEnd->format('H:i'),   // ✅ jam pulang SESI yang benar (mis. 07:40)
                 'max_menit'  => max(0, $maxMenit),
                 'sesi'       => $roster->sesi,
+                'tanggal'    => Carbon::parse($roster->tanggal_dinas)->format('Y-m-d'),
             ],
         ], 200);
     }
@@ -572,5 +554,48 @@ class LemburController extends Controller
         if (!$roster || !$roster->shift) return null;
 
         return ($roster->shift->jam_pulang < $roster->shift->jam_masuk) ? $roster : null;
+    }
+
+    /**
+     * ✅ SESI REFERENSI untuk ekstensi — mendukung shift malam lintas hari & shift custom.
+     * Urutan prioritas:
+     *  1) Roster dari sesi yang masih AKTIF (belum absen pulang)
+     *  2) Roster dari sesi terakhir yang SUDAH dipulangkan (≤ 36 jam)
+     *  3) Roster kemarin/hari ini yang jendela pulangnya sudah lewat
+     */
+    private function rosterReferensiEkstensi(int $userId, Carbon $now, ?LogAbsensi $logAktif): ?JadwalRoster
+    {
+        if ($logAktif && $logAktif->roster_id) {
+            $r = JadwalRoster::with('shift')->find($logAktif->roster_id);
+            if ($r) return $r;
+        }
+
+        $logSelesai = LogAbsensi::where('user_id', $userId)
+            ->whereNotNull('waktu_pulang')
+            ->where('waktu_pulang', '>=', $now->copy()->subHours(36))
+            ->orderByDesc('waktu_pulang')
+            ->first();
+
+        if ($logSelesai && $logSelesai->roster_id) {
+            $r = JadwalRoster::with('shift')->find($logSelesai->roster_id);
+            if ($r) return $r;
+        }
+
+        $candidates = JadwalRoster::with('shift')
+            ->where('user_id', $userId)
+            ->whereBetween('tanggal_dinas', [
+                $now->copy()->subDay()->toDateString(),
+                $now->toDateString(),
+            ])
+            ->orderByDesc('tanggal_dinas')
+            ->orderByDesc('sesi')
+            ->get();
+
+        foreach ($candidates as $r) {
+            [, $winEnd] = \App\Http\Controllers\Api\AbsensiController::jendelaSesi($r);
+            if ($now->gte($winEnd)) return $r;
+        }
+
+        return null;
     }
 }
