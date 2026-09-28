@@ -96,20 +96,37 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
         $rows[] = $pad(['Total Keterlambatan', ((int) ($s['total_terlambat_menit'] ?? 0)) . ' menit']);
         $rows[] = $pad([]);
 
-        // ===== BREAKDOWN (tetap seperti sebelumnya — berbasis menit) =====
+        // ===== BREAKDOWN KETERLAMBATAN — 3 kategori + potongan Rupiah =====
         $rows[] = $pad(['BREAKDOWN KETERLAMBATAN (PERATURAN POTONGAN)']);
-        $rows[] = $pad(['Kategori', 'Total Menit', 'Persentase', 'Potongan (mnt)']);
-        $rows[] = $pad(['Terlambat 6 - 10 menit',  (int) ($s['terlambat_6_10'] ?? 0),  '25%',]);
-        $rows[] = $pad(['Terlambat 11 - 15 menit', (int) ($s['terlambat_11_15'] ?? 0), '50%',]);
-        $rows[] = $pad(['Terlambat 16 - 20 menit', (int) ($s['terlambat_16_20'] ?? 0), '100%',]);
+        $rows[] = $pad(['Kategori', 'Persentase', 'Total Menit', 'Potongan (Rupiah)']);
 
-        $terlambat21plus = (int) ($s['terlambat_21plus'] ?? 0);
-        if ($terlambat21plus > 0) {
-            $rows[] = $pad(['Terlambat > 20 menit', $terlambat21plus, 'Tindak Lanjut', $terlambat21plus]);
-        }
+        $j1 = (int) ($s['jumlah_6_10'] ?? 0);
+        $j2 = (int) ($s['jumlah_11_15'] ?? 0);
+        $j3 = (int) ($s['jumlah_16plus'] ?? 0);
+
+        $rows[] = $pad([
+            'Terlambat 6 - 10 menit' . ($j1 > 1 ? " ({$j1}x)" : ''),
+            '25%',
+            (int) ($s['terlambat_6_10'] ?? 0),
+            (int) ($s['rupiah_6_10'] ?? 0),
+        ]);
+        $rows[] = $pad([
+            'Terlambat 11 - 15 menit' . ($j2 > 1 ? " ({$j2}x)" : ''),
+            '50%',
+            (int) ($s['terlambat_11_15'] ?? 0),
+            (int) ($s['rupiah_11_15'] ?? 0),
+        ]);
+        $rows[] = $pad([
+            'Terlambat ≥ 16 menit' . ($j3 > 1 ? " ({$j3}x)" : ''),
+            '100%',
+            (int) ($s['terlambat_16plus'] ?? 0),
+            (int) ($s['rupiah_16plus'] ?? 0),
+        ]);
 
         $rows[] = $pad([]);
-        $rows[] = $pad(['TOTAL POTONGAN', '', '', ((int) ($s['total_potongan'] ?? 0)) . ' menit']);
+        $rows[] = $pad(['TOTAL POTONGAN', '', '', (int) ($s['total_potongan_rupiah'] ?? 0)]);
+
+        return $rows;
 
         return $rows;
     }
@@ -219,7 +236,9 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
         }
 
         // ===== 6. BREAKDOWN (4 kolom, seperti sebelumnya) =====
+        // ===== 6. BREAKDOWN (3 baris data + total) =====
         if ($breakdownRow) {
+            // Banner header (hanya 4 kolom)
             foreach (['A', 'B', 'C', 'D'] as $col) {
                 $sheet->getStyle($col . $breakdownRow)->applyFromArray([
                     'font' => ['bold' => true, 'size' => 12, 'color' => ['rgb' => 'FFFFFF']],
@@ -229,6 +248,7 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
             $sheet->getStyle("A{$breakdownRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
             $sheet->getRowDimension($breakdownRow)->setRowHeight(22);
 
+            // Header kolom
             $h = $breakdownRow + 1;
             foreach (['A', 'B', 'C', 'D'] as $col) {
                 $sheet->getStyle($col . $h)->applyFromArray([
@@ -239,24 +259,38 @@ class RekapKaryawanSheet implements FromArray, WithStyles, WithTitle, ShouldAuto
                 ]);
             }
 
-            $colors = ['FFF8E1', 'FFECB3', 'FFCCBC', 'FFAB91'];
-            for ($i = 0; $i < 4; $i++) {
-                $r     = $breakdownRow + 2 + $i;
-                $label = $data[$r - 1][0] ?? null;
-
-                if ($label && $label !== 'TOTAL POTONGAN') {
-                    foreach (['A', 'B', 'C', 'D'] as $col) {
-                        $sheet->getStyle($col . $r)->applyFromArray([
-                            'fill'    => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => $colors[$i]]],
-                            'borders' => $this->thinBorder(),
-                        ]);
-                    }
-                    $sheet->getStyle("A{$r}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
-                    foreach (['B', 'C', 'D'] as $col) {
-                        $sheet->getStyle($col . $r)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-                    }
+            // 3 baris data breakdown
+            $colors = ['FFF8E1', 'FFECB3', 'FFCCBC'];
+            for ($i = 0; $i < 3; $i++) {
+                $r = $breakdownRow + 2 + $i;
+                foreach (['A', 'B', 'C', 'D'] as $col) {
+                    $sheet->getStyle($col . $r)->applyFromArray([
+                        'fill'    => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => $colors[$i]]],
+                        'borders' => $this->thinBorder(),
+                    ]);
                 }
+                $sheet->getStyle("A{$r}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
+                foreach (['B', 'C', 'D'] as $col) {
+                    $sheet->getStyle($col . $r)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+                }
+                // Format Rupiah di kolom D
+                $sheet->getStyle("D{$r}")->getNumberFormat()->setFormatCode('"Rp" #,##0');
             }
+        }
+
+        // ===== 7. TOTAL POTONGAN (di kolom D, format Rupiah) =====
+        if ($totalPotonganRow) {
+            foreach (['A', 'D'] as $col) {
+                $sheet->getStyle($col . $totalPotonganRow)->applyFromArray([
+                    'font'    => ['bold' => true, 'size' => 11, 'color' => ['rgb' => 'FFFFFF']],
+                    'fill'    => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'B71C1C']],
+                    'borders' => $this->mediumBorder(),
+                ]);
+            }
+            $sheet->getStyle("A{$totalPotonganRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
+            $sheet->getStyle("D{$totalPotonganRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getStyle("D{$totalPotonganRow}")->getNumberFormat()->setFormatCode('"Rp" #,##0');
+            $sheet->getRowDimension($totalPotonganRow)->setRowHeight(22);
         }
 
         // ===== 7. TOTAL POTONGAN =====

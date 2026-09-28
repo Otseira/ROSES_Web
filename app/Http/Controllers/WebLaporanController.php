@@ -117,10 +117,12 @@ class WebLaporanController extends Controller
             $totalOncallMenit    = 0;
             $totalTerlambatMenit = 0;
 
-            $terlambat6_10   = 0;   // potongan 25%
-            $terlambat11_15  = 0;   // potongan 50%
-            $terlambat16_20  = 0;   // potongan 100%
-            $terlambat21plus = 0;   // perlu tindak lanjut
+            $terlambat6_10   = 0;
+            $jumlah6_10   = 0;
+            $terlambat11_15  = 0;
+            $jumlah11_15  = 0;
+            $terlambat16plus = 0;
+            $jumlah16plus = 0;
 
             $rows = [];
             foreach ($groupLogs as $log) {
@@ -149,12 +151,13 @@ class WebLaporanController extends Controller
 
                 if ($mntTerlambat >= 6 && $mntTerlambat <= 10) {
                     $terlambat6_10 += $mntTerlambat;
+                    $jumlah6_10++;
                 } elseif ($mntTerlambat >= 11 && $mntTerlambat <= 15) {
                     $terlambat11_15 += $mntTerlambat;
-                } elseif ($mntTerlambat >= 16 && $mntTerlambat <= 20) {
-                    $terlambat16_20 += $mntTerlambat;
-                } elseif ($mntTerlambat > 20) {
-                    $terlambat21plus += $mntTerlambat;
+                    $jumlah11_15++;
+                } elseif ($mntTerlambat >= 16) {
+                    $terlambat16plus += $mntTerlambat;
+                    $jumlah16plus++;   // ✅ semua ≥16 digabung
                 }
 
                 $rows[] = [
@@ -171,10 +174,11 @@ class WebLaporanController extends Controller
             }
 
             // ===== Hitung potongan =====
-            $potongan6_10  = (int) round($terlambat6_10 * 0.25);
-            $potongan11_15 = (int) round($terlambat11_15 * 0.50);
-            $potongan16_20 = $terlambat16_20;  // 100%
-            $totalPotongan = $potongan6_10 + $potongan11_15 + $potongan16_20 + $terlambat21plus;
+            // ✅ POTONGAN RUPIAH: 25.000 × persentase × jumlah kejadian
+            $rupiah6_10   = (int) round($jumlah6_10   * 25000 * 0.25);   // Rp 6.250 / kejadian
+            $rupiah11_15  = (int) round($jumlah11_15  * 25000 * 0.50);   // Rp 12.500 / kejadian
+            $rupiah16plus = (int) round($jumlah16plus * 25000 * 1.00);   // Rp 25.000 / kejadian
+            $totalPotonganRupiah = $rupiah6_10 + $rupiah11_15 + $rupiah16plus;
 
             $sheetsData[] = [
                 'nama' => $user?->name ?? 'Tanpa Nama',
@@ -184,14 +188,17 @@ class WebLaporanController extends Controller
                     'total_lembur_menit'    => (int) round($totalLemburMenit),
                     'total_oncall_menit'    => (int) round($totalOncallMenit),
                     'total_terlambat_menit' => $totalTerlambatMenit,
+                    // ✅ Struktur baru: 3 kategori + rupiah
                     'terlambat_6_10'        => $terlambat6_10,
+                    'jumlah_6_10'           => $jumlah6_10,
+                    'rupiah_6_10'           => $rupiah6_10,
                     'terlambat_11_15'       => $terlambat11_15,
-                    'terlambat_16_20'       => $terlambat16_20,
-                    'terlambat_21plus'      => $terlambat21plus,
-                    'potongan_6_10'         => $potongan6_10,
-                    'potongan_11_15'        => $potongan11_15,
-                    'potongan_16_20'        => $potongan16_20,
-                    'total_potongan'        => $totalPotongan,
+                    'jumlah_11_15'          => $jumlah11_15,
+                    'rupiah_11_15'          => $rupiah11_15,
+                    'terlambat_16plus'      => $terlambat16plus,
+                    'jumlah_16plus'         => $jumlah16plus,
+                    'rupiah_16plus'         => $rupiah16plus,
+                    'total_potongan_rupiah' => $totalPotonganRupiah,
                 ],
             ];
         }
