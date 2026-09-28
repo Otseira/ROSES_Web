@@ -173,7 +173,6 @@ class RosterController extends Controller
 
     public function jadwalDinas(Request $request)
     {
-        // Method ini tidak perlu diubah karena ini khusus untuk user melihat jadwalnya sendiri
         $user  = $request->user();
         $bulan = (int) $request->query('bulan', now()->month);
         $tahun = (int) $request->query('tahun', now()->year);
@@ -187,7 +186,6 @@ class RosterController extends Controller
             ->whereBetween('tanggal_dinas', [$start->toDateString(), $end->toDateString()])
             ->get()
             ->groupBy(fn($r) => (int) \Carbon\Carbon::parse($r->tanggal_dinas)->day);
-
 
         $lemburs = LogLembur::where('user_id', $user->id)
             ->where('status_validasi', 'Disetujui')
@@ -209,20 +207,19 @@ class RosterController extends Controller
             }
         }
 
+        $jam = fn($r, $k) => $r ? substr((string) ($r->{'custom_jam_' . $k} ?? $r->shift?->{'jam_' . $k} ?? ''), 0, 5) : null;
+
         $hari = [];
         for ($d = 1; $d <= $jumlahHari; $d++) {
             $list = $rosters[$d] ?? collect();
             $r1   = $list->firstWhere('sesi', 1);
             $r2   = $list->firstWhere('sesi', 2);
-
             $log1 = $r1?->logAbsensi;
             $log2 = $r2?->logAbsensi;
 
             $shiftNama = $r1?->shift?->nama_shift;
             $low = strtolower(trim((string) $shiftNama));
             $libur = ($r1 === null && $r2 === null) || str_contains($low, 'libur') || $low === 'off';
-
-            $jam = fn($r, $kolom) => $r ? substr((string) ($r->{'custom_jam_' . $kolom} ?? $r->shift?->{'jam_' . $kolom} ?? ''), 0, 5) : null;
 
             $hari[] = [
                 'tanggal'         => $d,
@@ -235,9 +232,9 @@ class RosterController extends Controller
                 'terlambat_menit' => (int) ($log1?->menit_terlambat ?? 0),
                 'lembur_masuk'    => $masukByDay[$d] ?? null,
                 'lembur_keluar'   => $keluarByDay[$d] ?? null,
-                // ✅ SESI 2 (field tambahan; aplikasi lama tetap aman)
+                // ✅ SESI 2 — null bila hari itu hanya 1 shift
                 'sesi2' => $r2 ? [
-                    'nama_shift'      => $r2->shift?->nama_shift,
+                    'nama_shift'      => $r2->custom_nama_shift ?? $r2->shift?->nama_shift,
                     'jam_masuk'       => $jam($r2, 'masuk'),
                     'jam_keluar'      => $jam($r2, 'pulang'),
                     'absen_masuk'     => $log2?->waktu_masuk  ? $fmtHm($log2->waktu_masuk)  : null,
@@ -257,7 +254,6 @@ class RosterController extends Controller
                 'hari'        => $hari,
             ],
         ], 200, [
-            // ✅ Anti-cache: aplikasi mobile selalu ambil data fresh
             'Cache-Control' => 'no-cache, no-store, must-revalidate',
             'Pragma' => 'no-cache',
             'Expires' => '0',
