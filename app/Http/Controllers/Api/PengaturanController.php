@@ -16,23 +16,21 @@ class PengaturanController extends Controller
      */
     public function branding()
     {
-        $p = PengaturanAplikasi::first();
+        $p    = PengaturanAplikasi::first();
         $base = rtrim((string) config('app.url'), '/');
 
-        $logoUrl = null;
-        if ($p?->logo) {
-            // Tambahkan cache-buster berdasarkan waktu update record
-            // agar logo selalu ter-refresh saat diupload ulang
-            $cacheBuster = $p->updated_at ? $p->updated_at->timestamp : time();
-            $logoUrl = $base . '/storage/' . $p->logo . '?v=' . $cacheBuster;
-        }
+        // Cache-buster: logo & background selalu fresh setelah diupload ulang
+        $v = $p?->updated_at ? $p->updated_at->timestamp : time();
 
         return response()->json([
             'success' => true,
-            'data' => [
-                'nama_instansi' => $p?->nama_instansi,
-                'tagline'       => $p?->tagline,
-                'logo_url'      => $logoUrl,
+            'data'    => [
+                'nama_instansi'   => $p?->nama_instansi,
+                'tagline'         => $p?->tagline,
+                'logo_url'        => $p?->logo ? $base . '/storage/' . $p->logo . '?v=' . $v : null,
+                'splash_bg_url'   => $p?->splash_bg ? $base . '/storage/' . $p->splash_bg . '?v=' . $v : null,
+                'splash_bg_color' => $p?->splash_bg_color ?: null,
+                // ⚠️ latitude/longitude/radius TIDAK disertakan (rahasia geofencing)
             ],
         ]);
     }
