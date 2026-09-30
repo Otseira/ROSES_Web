@@ -139,8 +139,30 @@ class WebRosterController extends Controller
 
                 foreach ($dates as $tanggal => $sesiMap) {
                     foreach ([1, 2] as $sesi) {
-                        $d = $sesiMap[$sesi] ?? null;
-                        if ($d === null) continue;
+                        $adaInput = array_key_exists($sesi, $sesiMap);
+                        $d        = $sesiMap[$sesi] ?? null;
+
+                        // ✅ FIX: sesi 2 TIDAK dikirim = pengguna mengosongkannya.
+                        //    Hapus baris sesi 2 lama di database (sebelumnya dilewati,
+                        //    sehingga jadwal lama muncul lagi setelah simpan).
+                        if ($sesi === 2 && !$adaInput) {
+                            $adaBarisLama = JadwalRoster::where('user_id', $userId)
+                                ->where('tanggal_dinas', $tanggal)
+                                ->where('sesi', 2)
+                                ->exists();
+
+                            if ($adaBarisLama) {
+                                JadwalRoster::where('user_id', $userId)
+                                    ->where('tanggal_dinas', $tanggal)
+                                    ->where('sesi', 2)
+                                    ->delete();
+
+                                $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, null);
+                            }
+                            continue;
+                        }
+
+                        if (!$adaInput || $d === null) continue;
 
                         $kosong = empty($d['shiftId']) && empty($d['customMasuk']);
 
