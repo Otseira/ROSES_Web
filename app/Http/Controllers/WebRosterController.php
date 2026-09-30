@@ -196,7 +196,11 @@ class WebRosterController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => "Jadwal disimpan ({$countShift} sesi). {$countAbsen} absensi otomatis disesuaikan dengan jadwal terbaru.",
+                'message' => "Jadwal disimpan ({$countShift} sesi, {$countAbsen} absensi disinkronkan)."
+                    . " [DIAGNOSTIK] diterima1=" . count($rosterData1)
+                    . " diterima2=" . count($rosterData2)
+                    . " entri=" . count($entries)
+                    . " userValid=" . count($validUserIds),
             ]);
         } catch (\Exception $e) {
             return response()->json([
