@@ -28,20 +28,42 @@ class AbsensiController extends Controller
         $now   = Carbon::now();
         $today = $now->toDateString();
 
-        // 1) Sesi masih aktif (belum absen pulang) → tolak
+        // ===== 1) GUARD SADAR-SESI =====
+        // Cek apakah ada log aktif (belum pulang) dari sesi yang JENDELANYA MASIH TERBUKA
         $logAktif = LogAbsensi::where('user_id', $user->id)
             ->whereNull('waktu_pulang')
             ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
             ->first();
 
         if ($logAktif) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Sesi dinas Anda masih aktif. Lakukan absen pulang terlebih dahulu.',
-            ], 422);
+            $masihDalamJendela = false;
+
+            if ($logAktif->roster_id) {
+                $rosterLog = JadwalRoster::find($logAktif->roster_id);
+                if ($rosterLog) {
+                    [, $winEnd] = self::jendelaSesi($rosterLog);
+                    // Sesi masih aktif bila belum melewati jam pulang + 30 menit toleransi
+                    if ($now->lte($winEnd->copy()->addMinutes(30))) {
+                        $masihDalamJendela = true;
+                    }
+                }
+            } else {
+                // Log tanpa roster (Tanpa Jadwal) — anggap masih aktif bila < 16 jam
+                if ($logAktif->waktu_masuk->diffInHours($now) < 16) {
+                    $masihDalamJendela = true;
+                }
+            }
+
+            if ($masihDalamJendela) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sesi dinas Anda masih aktif. Lakukan absen pulang terlebih dahulu.',
+                ], 422);
+            }
+            // Kalau sudah lewat jendela → izinkan absen sesi baru (anggap auto-pulang / lupa absen pulang)
         }
 
-        // 2) Ambil semua sesi hari ini (1 & 2) + fallback shift malam kemarin
+        // ===== 2) Ambil semua sesi hari ini =====
         $rostersHariIni = JadwalRoster::with('shift')
             ->where('user_id', $user->id)
             ->where('tanggal_dinas', $today)
@@ -53,7 +75,7 @@ class AbsensiController extends Controller
             if ($malam) $rostersHariIni = collect([$malam]);
         }
 
-        // 3) Cari sesi TARGET: jendela waktunya memuat sekarang & belum dipakai absen
+        // ===== 3) Cari sesi TARGET: dalam jendela & belum diabsen =====
         $target = null;
         foreach ($rostersHariIni as $r) {
             $sudahDipakai = LogAbsensi::where('roster_id', $r->id)
@@ -61,19 +83,41 @@ class AbsensiController extends Controller
                 ->exists();
             if ($sudahDipakai) continue;
 
-            [, $winEnd] = self::jendelaSesi($r);
+            [$winStart, $winEnd] = self::jendelaSesi($r);
 
-            // Sesi masih valid selama belum melewati jam pulang
-            if ($now->lte($winEnd)) {
+            // ✅ FIX: harus dalam jendela (bawah & atas)
+            if ($now->gte($winStart) && $now->lte($winEnd)) {
                 $target = $r;
                 break;
             }
         }
 
-        // 4) Jika tidak ada target → semua sesi sudah selesai atau tidak ada jadwal
+        // ===== 4) Jika tidak ada target, cek apakah ada sesi yang AKAN DATANG =====
         if (!$target) {
+            $sesiAkanDatang = null;
+            foreach ($rostersHariIni as $r) {
+                $sudahDipakai = LogAbsensi::where('roster_id', $r->id)
+                    ->whereNotNull('waktu_masuk')
+                    ->exists();
+                if ($sudahDipakai) continue;
 
-            // b) Semua sesi hari ini sudah selesai → arahkan ke On-Call
+                [$winStart,] = self::jendelaSesi($r);
+                if ($now->lt($winStart)) {
+                    $sesiAkanDatang = $r;
+                    break;
+                }
+            }
+
+            if ($sesiAkanDatang) {
+                [$winStart,] = self::jendelaSesi($sesiAkanDatang);
+                $jamMulai = $winStart->copy()->addMinutes(self::MASUK_CEPAT_MAKS_MENIT)->format('H:i');
+                return response()->json([
+                    'success' => false,
+                    'message' => "Belum waktunya absen. Sesi {$sesiAkanDatang->sesi} baru bisa diabsen mulai pukul {$jamMulai}.",
+                ], 422);
+            }
+
+            // Semua sesi sudah selesai → arahkan ke On-Call
             $logSelesaiHariIni = LogAbsensi::where('user_id', $user->id)
                 ->whereDate('waktu_masuk', $today)
                 ->whereNotNull('waktu_pulang')
@@ -85,10 +129,9 @@ class AbsensiController extends Controller
                     'message' => 'Absensi hari ini sudah selesai. Untuk tugas tambahan setelah pulang, gunakan menu On-Call.',
                 ], 422);
             }
-            // c) Tidak ada jadwal & belum ada sesi selesai hari ini → jalur "Tanpa Jadwal" (target tetap null)
         }
 
-        // 5) Cek radius (seragam, dinamis)
+        // ===== 5) Cek radius =====
         $cekRadius = $this->verifikasiRadius($request, 'Absen masuk');
         if ($cekRadius !== true) return $cekRadius;
 
@@ -96,7 +139,7 @@ class AbsensiController extends Controller
             ? $request->file('foto')->store('absensi/masuk', 'public')
             : null;
 
-        // 6) Simpan log — menempel ke roster SESI yang cocok
+        // ===== 6) Simpan log =====
         $log = LogAbsensi::create([
             'user_id'          => $user->id,
             'roster_id'        => $target?->id,
