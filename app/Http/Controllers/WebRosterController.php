@@ -79,14 +79,21 @@ class WebRosterController extends Controller
     /**
      * ✅ SIMPAN ROSTER + validasi batas tgl 7 + AUTO-SYNC absensi.
      */
+    /**
+     * ✅ SIMPAN ROSTER — hanya memproses sel yang disentuh (key ada di input).
+     *    Semantik:
+     *      • key TIDAK ada  → sel tidak disentuh, lewati tanpa query
+     *      • key ADA, kosong → hapus jadwal sesi tsb
+     *      • key ADA, berisi → updateOrCreate jadwal
+     */
     public function bulkStore(Request $request)
     {
         try {
             $rosterData1 = $request->input('roster', []);
             $rosterData2 = $request->input('roster2', []);
 
-            if (!$rosterData1 && !$rosterData2) {
-                return response()->json(['success' => false, 'message' => 'Tidak ada data jadwal yang dikirim.']);
+            if (empty($rosterData1) && empty($rosterData2)) {
+                return response()->json(['success' => true, 'message' => 'Tidak ada perubahan jadwal yang dikirim.']);
             }
 
             $userLogin = $request->user();
@@ -107,20 +114,19 @@ class WebRosterController extends Controller
                 }
             }
 
-            // ✅ $validUserIds DIBENTUK DAHULU sebelum dipakai di log
+            // $validUserIds dibentuk dulu agar bisa dipakai di log
             $validUserIds = User::whereIn('id', array_keys($entries))
                 ->when($allowed !== null, fn($q) => $q->whereIn('unit_kerja_id', $allowed))
                 ->pluck('id')
                 ->toArray();
 
-            // ✅ Log diagnostik (pakai facade Log yang sudah di-import)
             Log::info('ROSTER-SAVE', [
                 'actor'           => $userLogin->id,
                 'users_tersentuh' => array_keys($entries),
                 'user_valid'      => $validUserIds,
             ]);
 
-            // ✅ VALIDASI ANTI-TUMPUK antar sesi
+            // ===== VALIDASI ANTI-TUMPUK antar sesi =====
             foreach ($entries as $userId => $dates) {
                 if (!in_array($userId, $validUserIds)) continue;
 
@@ -148,7 +154,7 @@ class WebRosterController extends Controller
                 }
             }
 
-            // ✅ SIMPAN per sesi
+            // ===== SIMPAN per sesi (hanya yang disentuh) =====
             $countShift = 0;
             $countAbsen = 0;
 
@@ -157,40 +163,29 @@ class WebRosterController extends Controller
 
                 foreach ($dates as $tanggal => $sesiMap) {
                     foreach ([1, 2] as $sesi) {
-                        $adaInput = array_key_exists($sesi, $sesiMap);
-                        $d        = $sesiMap[$sesi] ?? null;
+                        // ✅ SEL TIDAK DISENTUH → lewati (tanpa query apa pun)
+                        if (!array_key_exists($sesi, $sesiMap)) continue;
 
-                        if ($sesi === 2 && !$adaInput) {
-                            $adaBarisLama = JadwalRoster::where('user_id', $userId)
+                        $d = $sesiMap[$sesi];
+
+                        // ✅ KEY ADA TAPI KOSONG → hapus jadwal sesi ini
+                        $kosong = is_array($d)
+                            ? (empty($d['shiftId']) && empty($d['customMasuk']))
+                            : (empty($d) && $d !== '0');
+
+                        if ($kosong) {
+                            $deleted = JadwalRoster::where('user_id', $userId)
                                 ->where('tanggal_dinas', $tanggal)
-                                ->where('sesi', 2)
-                                ->exists();
+                                ->where('sesi', $sesi)
+                                ->delete();
 
-                            if ($adaBarisLama) {
-                                JadwalRoster::where('user_id', $userId)
-                                    ->where('tanggal_dinas', $tanggal)
-                                    ->where('sesi', 2)
-                                    ->delete();
-
+                            if ($deleted) {
                                 $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, null);
                             }
                             continue;
                         }
 
-                        if (!$adaInput || $d === null) continue;
-
-                        $kosong = empty($d['shiftId']) && empty($d['customMasuk']);
-
-                        if ($kosong) {
-                            JadwalRoster::where('user_id', $userId)
-                                ->where('tanggal_dinas', $tanggal)
-                                ->where('sesi', $sesi)
-                                ->delete();
-
-                            $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, null);
-                            continue;
-                        }
-
+                        // ✅ KEY BERISI → tulis jadwal
                         $shiftId = empty($d['customMasuk']) ? $d['shiftId'] : null;
 
                         $roster = JadwalRoster::updateOrCreate(

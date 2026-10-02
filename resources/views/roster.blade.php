@@ -228,42 +228,6 @@ $shiftMap[(string) $s->id] = [
                             : 'bg-slate-100 text-slate-400');
                             @endphp
                             <td class="p-0 border-b border-l border-slate-100" data-day="{{ $i }}">
-                                {{-- Input sesi 1 --}}
-                                @if($r1 && $r1->custom_jam_masuk)
-                                <input type="hidden" name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}][shift_id]"
-                                    value="">
-                                <input type="hidden"
-                                    name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_jam_masuk]"
-                                    value="{{ $r1->custom_jam_masuk }}">
-                                <input type="hidden"
-                                    name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_jam_pulang]"
-                                    value="{{ $r1->custom_jam_pulang }}">
-                                <input type="hidden"
-                                    name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_nama_shift]"
-                                    value="{{ $r1->custom_nama_shift }}">
-                                @else
-                                <input type="hidden" name="roster[{{ $pegawai->id }}][{{ $tanggalSekarang }}]"
-                                    value="{{ $r1->shift_id ?? '' }}">
-                                @endif
-
-                                {{-- Input sesi 2 (hanya jika ada) --}}
-                                @if($r2 && $r2->custom_jam_masuk)
-                                <input type="hidden"
-                                    name="roster2[{{ $pegawai->id }}][{{ $tanggalSekarang }}][shift_id]" value="">
-                                <input type="hidden"
-                                    name="roster2[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_jam_masuk]"
-                                    value="{{ $r2->custom_jam_masuk }}">
-                                <input type="hidden"
-                                    name="roster2[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_jam_pulang]"
-                                    value="{{ $r2->custom_jam_pulang }}">
-                                <input type="hidden"
-                                    name="roster2[{{ $pegawai->id }}][{{ $tanggalSekarang }}][custom_nama_shift]"
-                                    value="{{ $r2->custom_nama_shift }}">
-                                @elseif($r2)
-                                <input type="hidden" name="roster2[{{ $pegawai->id }}][{{ $tanggalSekarang }}]"
-                                    value="{{ $r2->shift_id }}">
-                                @endif
-
                                 <div class="roster-cell h-11 flex flex-col items-center justify-center text-[9px] font-extrabold cursor-pointer select-none {{ $cls1 }}"
                                     data-user="{{ $pegawai->id }}" data-date="{{ $tanggalSekarang }}"
                                     data-shift="{{ $r1?->shift_id ?? '' }}"
@@ -275,8 +239,8 @@ $shiftMap[(string) $s->id] = [
                                     data-custom2="{{ $r2 && $r2->custom_jam_masuk ? 1 : 0 }}"
                                     data-c2-masuk="{{ $r2?->custom_jam_masuk }}"
                                     data-c2-pulang="{{ $r2?->custom_jam_pulang }}"
-                                    data-c2-nama="{{ $r2?->custom_nama_shift }}" <span class="line1 leading-tight">{{
-                                    $t1 ?? '—' }}</span>
+                                    data-c2-nama="{{ $r2?->custom_nama_shift }}">
+                                    <span class="line1 leading-tight">{{ $t1 ?? '—' }}</span>
                                     @if($t2)
                                     <span class="line2 leading-tight text-[8px] opacity-80">②{{ $t2 }}</span>
                                     @endif
@@ -514,7 +478,7 @@ $shiftMap[(string) $s->id] = [
 
             parent.querySelectorAll('input[type="hidden"]').forEach(function (i) { i.remove(); });
 
-            // Sesi 1
+            // ===== SESI 1 — selalu ditulis untuk sel yang disentuh =====
             if (cell.dataset.custom === '1' && cell.dataset.c1Masuk) {
                 addHidden(parent, 'roster[' + uid + '][' + date + '][shift_id]', '');
                 addHidden(parent, 'roster[' + uid + '][' + date + '][custom_jam_masuk]', cell.dataset.c1Masuk);
@@ -524,14 +488,14 @@ $shiftMap[(string) $s->id] = [
                 addHidden(parent, 'roster[' + uid + '][' + date + ']', cell.dataset.shift || '');
             }
 
-            // Sesi 2 (hanya bila terisi)
+            // ===== SESI 2 — SELALU ditulis untuk sel tersentuh ('' = hapus sesi 2) =====
             if (cell.dataset.custom2 === '1' && cell.dataset.c2Masuk) {
                 addHidden(parent, 'roster2[' + uid + '][' + date + '][shift_id]', '');
                 addHidden(parent, 'roster2[' + uid + '][' + date + '][custom_jam_masuk]', cell.dataset.c2Masuk);
                 addHidden(parent, 'roster2[' + uid + '][' + date + '][custom_jam_pulang]', cell.dataset.c2Pulang);
                 addHidden(parent, 'roster2[' + uid + '][' + date + '][custom_nama_shift]', cell.dataset.c2Nama || '');
-            } else if (cell.dataset.shift2 && cell.dataset.shift2 !== '') {
-                addHidden(parent, 'roster2[' + uid + '][' + date + ']', cell.dataset.shift2);
+            } else {
+                addHidden(parent, 'roster2[' + uid + '][' + date + ']', cell.dataset.shift2 || '');
             }
         }
 
