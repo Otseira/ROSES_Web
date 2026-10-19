@@ -285,7 +285,19 @@ class WebLaporanController extends Controller
         $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
         $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
 
-        $logs = LogAbsensi::with(['user.unitKerja', 'roster.user.unitKerja', 'roster.shift'])
+        $logs = LogAbsensi::select([
+                'id', 'user_id', 'roster_id', 'tanggal_dinas', 'waktu_masuk', 'waktu_pulang',
+                'menit_terlambat', 'status_kehadiran', 'jenis_absen',
+                'latitude_masuk', 'longitude_masuk', 'latitude_pulang', 'longitude_pulang'
+            ])
+            ->with([
+                'user:id,name,nik,unit_kerja_id',
+                'user.unitKerja:id,nama_unit',
+                'roster:id,user_id,shift_id,tanggal_dinas,custom_jam_masuk,custom_jam_pulang',
+                'roster.user:id,name,nik,unit_kerja_id',
+                'roster.user.unitKerja:id,nama_unit',
+                'roster.shift:id,nama_shift,jam_masuk,jam_pulang,toleransi_terlambat_menit'
+            ])
             ->whereBetween('waktu_masuk', [$startDate, $endDate])
             ->when($unit, function ($q) use ($unit) {
                 $q->where(function ($q2) use ($unit) {
@@ -325,7 +337,11 @@ class WebLaporanController extends Controller
                 return $log;
             });
 
-        $lemburs = LogLembur::with('user')
+        $lemburs = LogLembur::select([
+                'id', 'user_id', 'jenis_lembur', 'waktu_mulai_lembur', 'waktu_selesai_lembur',
+                'total_jam_lembur', 'status_validasi'
+            ])
+            ->with(['user:id,name,nik,unit_kerja_id'])
             ->where('status_validasi', 'Disetujui')   // ✅ filter utama
             ->whereBetween('waktu_mulai_lembur', [$startDate, $endDate])
             ->when($unit, fn($q) => $q->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unit)))
@@ -397,26 +413,40 @@ class WebLaporanController extends Controller
         $start = Carbon::createFromDate($tahun, $bulan, 1)->startOfDay();
         $end   = $start->copy()->endOfMonth()->endOfDay();
 
-        $query = LogLembur::with(['user.unitKerja'])
+        $baseQuery = LogLembur::query()
             ->whereBetween('waktu_mulai_lembur', [$start, $end]);
 
         if ($allowedUnitIds !== null) {
-            $query->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+            $baseQuery->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
         }
 
-        $allInPeriod = (clone $query)->get();
+        // Agregasi langsung di database (sangat cepat & hemat memori)
+        $stats = (clone $baseQuery)->selectRaw("
+            COUNT(*) as total_pengajuan,
+            COALESCE(SUM(CASE WHEN status_validasi = 'Disetujui' THEN total_jam_lembur ELSE 0 END), 0) as total_jam_disetujui,
+            COALESCE(SUM(CASE WHEN status_validasi = 'Pending' THEN 1 ELSE 0 END), 0) as jml_pending
+        ")->first();
 
-        $totalPengajuan    = $allInPeriod->count();
-        $totalJamDisetujui = (float) $allInPeriod->where('status_validasi', 'Disetujui')->sum('total_jam_lembur');
-        $jmlPending        = $allInPeriod->where('status_validasi', 'Pending')->count();
+        $totalPengajuan    = (int) ($stats->total_pengajuan ?? 0);
+        $totalJamDisetujui = (float) ($stats->total_jam_disetujui ?? 0);
+        $jmlPending        = (int) ($stats->jml_pending ?? 0);
 
         if (!empty($statusFilter)) {
-            $query->where('status_validasi', $statusFilter);
+            $baseQuery->where('status_validasi', $statusFilter);
         }
 
-        $lemburs = $query->orderByDesc('waktu_mulai_lembur')->get();
+        $lemburs = $baseQuery->select([
+                'id', 'user_id', 'jenis_lembur', 'waktu_mulai_lembur', 'waktu_selesai_lembur',
+                'total_jam_lembur', 'status_validasi', 'keterangan', 'latitude_masuk', 'longitude_masuk'
+            ])
+            ->with([
+                'user:id,name,nik,unit_kerja_id',
+                'user.unitKerja:id,nama_unit'
+            ])
+            ->orderByDesc('waktu_mulai_lembur')
+            ->get();
 
-        $pengaturan = PengaturanAplikasi::first();
+        $pengaturan = PengaturanAplikasi::select(['latitude', 'longitude'])->first();
         $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
         $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
 

@@ -30,7 +30,8 @@ class AbsensiController extends Controller
 
         // ===== 1) GUARD SADAR-SESI =====
         // Cek apakah ada log aktif (belum pulang) dari sesi yang JENDELANYA MASIH TERBUKA
-        $logAktif = LogAbsensi::where('user_id', $user->id)
+        $logAktif = LogAbsensi::with('roster.shift')
+            ->where('user_id', $user->id)
             ->whereNull('waktu_pulang')
             ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
             ->first();
@@ -39,7 +40,7 @@ class AbsensiController extends Controller
             $masihDalamJendela = false;
 
             if ($logAktif->roster_id) {
-                $rosterLog = JadwalRoster::find($logAktif->roster_id);
+                $rosterLog = $logAktif->roster;
                 if ($rosterLog) {
                     [, $winEnd] = self::jendelaSesi($rosterLog);
                     // Sesi masih aktif bila belum melewati jam pulang + 30 menit toleransi

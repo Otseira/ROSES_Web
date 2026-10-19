@@ -24,7 +24,11 @@ class WebPegawaiController extends Controller
     {
         $userLogin = $request->user();
 
-        $query = User::with(['unitKerja', 'managesUnits']);
+        $query = User::select(['id', 'nik', 'username', 'name', 'email', 'nomor_whatsapp', 'role', 'unit_kerja_id', 'is_active', 'foto_profil'])
+            ->with([
+                'unitKerja:id,nama_unit',
+                'managesUnits:id,nama_unit'
+            ]);
 
         if (!$userLogin->hasGlobalAccess()) {
             $managedUnits = $userLogin->managesUnits()->pluck('master_unit_kerja_id')->toArray();

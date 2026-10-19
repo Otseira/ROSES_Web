@@ -53,7 +53,7 @@
             class="bg-primary text-slate-300 transition-all duration-300 flex flex-col shadow-2xl z-20 relative">
 
             @php
-            $pengaturanGlobal = \App\Models\PengaturanAplikasi::first();
+            $pengaturanGlobal = \App\Models\PengaturanAplikasi::select(['id', 'logo', 'nama_instansi'])->first();
             $logo = ($pengaturanGlobal instanceof \App\Models\PengaturanAplikasi) ? $pengaturanGlobal->logo : null;
             $namaInstansi = ($pengaturanGlobal instanceof \App\Models\PengaturanAplikasi && !empty($pengaturanGlobal->nama_instansi))
                 ? $pengaturanGlobal->nama_instansi

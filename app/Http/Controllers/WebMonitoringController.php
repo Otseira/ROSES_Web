@@ -16,7 +16,8 @@ class WebMonitoringController extends Controller
         $userLogin = $request->user();
         
         // Tarik jadwal dinas hari ini dengan pembatasan hak akses unit kerja
-        $query = JadwalRoster::with(['user.unitKerja', 'shift', 'logAbsensi'])
+        $query = JadwalRoster::select(['id', 'user_id', 'shift_id', 'tanggal_dinas'])
+            ->with(['logAbsensi:id,roster_id,waktu_masuk,menit_terlambat'])
             ->where('tanggal_dinas', $hariIni);
 
         if (!$userLogin->hasGlobalAccess()) {

@@ -52,9 +52,16 @@ class WebRosterController extends Controller
         }
 
         $staf = $queryStaf
-            ->with(['unitKerja', 'rosters' => function ($q) use ($tahun, $bulan) {
-                $q->whereYear('tanggal_dinas', $tahun)->whereMonth('tanggal_dinas', $bulan);
-            }])
+            ->select(['id', 'name', 'nik', 'unit_kerja_id'])
+            ->with([
+                'unitKerja:id,nama_unit',
+                'rosters' => function ($q) use ($tahun, $bulan) {
+                    $q->select(['id', 'user_id', 'shift_id', 'tanggal_dinas', 'sesi', 'custom_jam_masuk', 'custom_jam_pulang'])
+                      ->whereYear('tanggal_dinas', $tahun)
+                      ->whereMonth('tanggal_dinas', $bulan);
+                },
+                'rosters.shift:id,nama_shift,jam_masuk,jam_pulang'
+            ])
             ->orderBy('name')
             ->get();
 
@@ -62,13 +69,17 @@ class WebRosterController extends Controller
             return $u->unitKerja ? $u->unitKerja->nama_unit : 'Tanpa Unit';
         })->sortKeys();
 
-        $shiftsQuery = MasterShift::query()->orderBy('jam_masuk');
+        $shiftsQuery = MasterShift::query()
+            ->select(['id', 'nama_shift', 'jam_masuk', 'jam_pulang', 'unit_kerja_id'])
+            ->orderBy('jam_masuk');
         if ($allowed !== null) {
             $shiftsQuery->whereIn('unit_kerja_id', $allowed);
         }
         $shifts = $shiftsQuery->get();
 
-        $liburMap = \App\Models\LiburNasional::whereYear('tanggal', $tahun)
+        $liburMap = \App\Models\LiburNasional::query()
+            ->select(['tanggal', 'nama', 'jenis'])
+            ->whereYear('tanggal', $tahun)
             ->get()
             ->mapWithKeys(fn($l) => [
                 $l->tanggal->format('Y-m-d') => ['nama' => $l->nama, 'jenis' => $l->jenis],

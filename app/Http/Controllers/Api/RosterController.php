@@ -68,14 +68,16 @@ class RosterController extends Controller
         // Exclude kepala unit itu sendiri dari daftar staf
         $stafQuery->where('id', '!=', $user->id);
 
-        $staf = $stafQuery->with(['rosters' => function ($query) use ($bulan, $tahun) {
-            $query->whereMonth('tanggal_dinas', $bulan)
-                ->whereYear('tanggal_dinas', $tahun)
-                ->with('shift');
-        }])
+        $staf = $stafQuery->select(['id', 'nik', 'name', 'unit_kerja_id'])
+            ->with(['rosters' => function ($query) use ($bulan, $tahun) {
+                $query->select(['id', 'user_id', 'shift_id', 'tanggal_dinas'])
+                    ->whereMonth('tanggal_dinas', $bulan)
+                    ->whereYear('tanggal_dinas', $tahun)
+                    ->with('shift:id,nama_shift,jam_masuk,jam_pulang');
+            }])
             ->get();
 
-        $shifts = MasterShift::all();
+        $shifts = MasterShift::select(['id', 'nama_shift', 'jam_masuk', 'jam_pulang', 'unit_kerja_id'])->get();
 
         return response()->json([
             'success' => true,

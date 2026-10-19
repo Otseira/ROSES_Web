@@ -77,7 +77,11 @@ class WebDashboardController extends Controller
 
     private function kkRostersHariIni($user)
     {
-        return \App\Models\JadwalRoster::with(['shift', 'user.unitKerja', 'logAbsensi'])
+        return \App\Models\JadwalRoster::select(['id', 'user_id', 'shift_id', 'tanggal_dinas'])
+            ->with([
+                'shift:id,nama_shift',
+                'logAbsensi:id,roster_id,waktu_masuk,menit_terlambat',
+            ])
             ->where('tanggal_dinas', now()->toDateString())
             ->when(!$this->kkIsGlobal($user), function ($q) use ($user) {
                 $managed = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
@@ -99,27 +103,31 @@ class WebDashboardController extends Controller
 
     private function kkHitung($user)
     {
-        $rosters  = $this->kkRostersHariIni($user);
-        $dinasR   = $rosters->reject(fn($r) => $this->kkIsLibur($r));
-        $hadirR   = $dinasR->filter(fn($r) => !empty($r->logAbsensi?->waktu_masuk));
+        $rosters      = $this->kkRostersHariIni($user);
+        $dinasR       = $rosters->reject(fn($r) => $this->kkIsLibur($r));
+        $hadirR       = $dinasR->filter(fn($r) => !empty($r->logAbsensi?->waktu_masuk));
+        $terlambatR   = $hadirR->filter(fn($r) => ($r->logAbsensi?->menit_terlambat ?? 0) > 0);
 
-        $dinasIds = $dinasR->pluck('user_id')->unique()->values();
-        $hadirIds = $hadirR->pluck('user_id')->unique()->values();
-        $belumIds = $dinasIds->diff($hadirIds)->values();
+        $dinasIds     = $dinasR->pluck('user_id')->unique()->values();
+        $hadirIds     = $hadirR->pluck('user_id')->unique()->values();
+        $terlambatIds = $terlambatR->pluck('user_id')->unique()->values();
+        $belumIds     = $dinasIds->diff($hadirIds)->values();
 
         $total        = $this->kkScopeUsers($user)->count();
         $rosterOrang  = $rosters->pluck('user_id')->unique()->count();
         $tidakDinas   = max(0, $total - $rosterOrang);
 
         return [
-            'total'       => $total,
-            'dinas'       => $dinasIds->count(),
-            'hadir'       => $hadirIds->count(),
-            'belum'       => $belumIds->count(),
-            'tidak_dinas' => $tidakDinas,
-            'dinas_ids'   => $dinasIds->all(),
-            'hadir_ids'   => $hadirIds->all(),
-            'belum_ids'   => $belumIds->all(),
+            'total'          => $total,
+            'dinas'          => $dinasIds->count(),
+            'hadir'          => $hadirIds->count(),
+            'terlambat'      => $terlambatIds->count(),
+            'belum'          => $belumIds->count(),
+            'tidak_dinas'    => $tidakDinas,
+            'dinas_ids'      => $dinasIds->all(),
+            'hadir_ids'      => $hadirIds->all(),
+            'terlambat_ids'  => $terlambatIds->all(),
+            'belum_ids'      => $belumIds->all(),
         ];
     }
 
@@ -138,6 +146,7 @@ class WebDashboardController extends Controller
             'total'       => $h['total'],
             'dinas'       => $h['dinas'],
             'hadir'       => $h['hadir'],
+            'terlambat'   => $h['terlambat'],
             'belum'       => $h['belum'],
             'tidak_dinas' => $h['tidak_dinas'],
         ]);
@@ -157,6 +166,9 @@ class WebDashboardController extends Controller
             case 'hadir':
                 $q = \App\Models\User::whereIn('id', $h['hadir_ids']);
                 break;
+            case 'terlambat':
+                $q = \App\Models\User::whereIn('id', $h['terlambat_ids']);
+                break;
             case 'belum':
                 $q = \App\Models\User::whereIn('id', $h['belum_ids']);
                 break;
@@ -168,8 +180,9 @@ class WebDashboardController extends Controller
                 break; // total
         }
 
-        $rows = $q->with('unitKerja')
-            ->get(['id', 'name', 'nik', 'unit_kerja_id'])
+        $rows = $q->select(['id', 'name', 'nik', 'unit_kerja_id'])
+            ->with('unitKerja:id,nama_unit')
+            ->get()
             ->map(fn($x) => [
                 'nama' => $x->name,
                 'nik'  => $x->nik,
