@@ -54,15 +54,19 @@
 
             @php
             $pengaturanGlobal = \App\Models\PengaturanAplikasi::first();
+            $logo = ($pengaturanGlobal instanceof \App\Models\PengaturanAplikasi) ? $pengaturanGlobal->logo : null;
+            $namaInstansi = ($pengaturanGlobal instanceof \App\Models\PengaturanAplikasi && !empty($pengaturanGlobal->nama_instansi))
+                ? $pengaturanGlobal->nama_instansi
+                : 'SIM Absensi Ropanasuri';
             $currentUser = auth()->user();
-            $userRole = $currentUser->role;
+            $userRole = $currentUser->role ?? 'pegawai';
             @endphp
 
             <div class="h-20 flex items-center justify-center border-b border-slate-800/50 px-4">
                 <a href="/dashboard" class="flex items-center gap-3 w-full"
                     :class="sidebarOpen ? 'justify-start' : 'justify-center'">
-                    @if($pengaturanGlobal && $pengaturanGlobal->logo)
-                    <img src="{{ asset('storage/' . $pengaturanGlobal->logo) }}" alt="Logo RS"
+                    @if(!empty($logo))
+                    <img src="{{ asset('storage/' . $logo) }}" alt="Logo RS"
                         class="h-10 w-auto object-contain shrink-0 drop-shadow-md bg-white/10 p-1 rounded-lg">
                     @else
                     <div
@@ -73,7 +77,7 @@
 
                     <span x-show="sidebarOpen"
                         class="text-sm font-extrabold text-white tracking-wide truncate leading-tight whitespace-normal">
-                        {{ $pengaturanGlobal->nama_instansi ?? 'SIM Absensi Ropanasuri' }}
+                        {{ $namaInstansi }}
                     </span>
                 </a>
             </div>
