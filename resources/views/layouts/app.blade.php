@@ -53,7 +53,7 @@
             class="bg-primary text-slate-300 transition-all duration-300 flex flex-col shadow-2xl z-20 relative">
 
             @php
-            $pengaturanGlobal = \Illuminate\Support\Facades\Cache::remember('pengaturan_aplikasi_global', 86400, fn() => \App\Models\PengaturanAplikasi::first());
+            $pengaturanGlobal = \App\Models\PengaturanAplikasi::first();
             $currentUser = auth()->user();
             $userRole = $currentUser->role;
             @endphp
