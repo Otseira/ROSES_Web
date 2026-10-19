@@ -43,6 +43,7 @@
             background: #94a3b8;
         }
     </style>
+    @stack('styles')
 </head>
 
 <body class="bg-slate-50 font-sans antialiased text-slate-800">
@@ -233,6 +234,7 @@
     <script>
         lucide.createIcons();
     </script>
+    @stack('scripts')
 </body>
 
 </html>

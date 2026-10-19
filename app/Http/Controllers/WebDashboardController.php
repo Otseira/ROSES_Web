@@ -13,44 +13,142 @@ class WebDashboardController extends Controller
     {
         $userLogin = $request->user();
         $hariIni = Carbon::today()->toDateString();
-
-        // Cek wewenang global (Superadmin, HRD, Direktur)
         $isGlobal = $userLogin->hasGlobalAccess();
+        $canSeeManagement = $this->kkCanSee($userLogin);
 
-        // 1. Ambil query roster jadwal hari ini
-        $queryJadwal = JadwalRoster::with('logAbsensi')->where('tanggal_dinas', $hariIni);
+        // Salam dinamis berdasarkan waktu lokal
+        $hour = (int) Carbon::now()->format('H');
+        if ($hour < 11) {
+            $salam = 'Selamat Pagi';
+        } elseif ($hour < 15) {
+            $salam = 'Selamat Siang';
+        } elseif ($hour < 18) {
+            $salam = 'Selamat Sore';
+        } else {
+            $salam = 'Selamat Malam';
+        }
 
-        // Jika bukan global access, kunci jadwal hanya untuk unit kerja yang dikelola
+        $scopeLabel = $isGlobal
+            ? 'Seluruh Unit RS'
+            : ($userLogin->unitKerja?->nama_unit ?? 'Unit Kerja Anda');
+
+        // Managed unit IDs for non-global access
+        $managedUnits = [];
         if (!$isGlobal) {
             $managedUnits = $userLogin->managesUnits()->pluck('master_unit_kerja_id')->toArray();
             if ($userLogin->unit_kerja_id && !in_array($userLogin->unit_kerja_id, $managedUnits)) {
                 $managedUnits[] = $userLogin->unit_kerja_id;
             }
-            if (empty($managedUnits)) {
-                $queryJadwal->whereRaw('1 = 0');
-            } else {
-                $queryJadwal->whereHas('user', function ($q) use ($managedUnits) {
-                    $q->whereIn('unit_kerja_id', $managedUnits);
-                });
-            }
         }
 
-        // 2. Kalkulasi Data Statistik (Eager Loaded, 1 Query)
-        $rosterHariIni = $queryJadwal->get();
-        $totalJadwal = $rosterHariIni->count();
+        // Data Manajemen (Untuk Superadmin, HRD, Direktur, Manajer, Kepala Unit, PJ)
+        $summary = null;
+        $pendingLemburCount = 0;
+        $recentAbsensi = collect();
 
-        $hadir = $rosterHariIni->filter(function ($r) {
-            return $r->logAbsensi && $r->logAbsensi->waktu_masuk !== null;
-        })->count();
+        if ($canSeeManagement) {
+            $h = $this->kkHitung($userLogin);
+            $persenHadir = $h['dinas'] > 0 ? round(($h['hadir'] / $h['dinas']) * 100, 1) : 0;
+            $summary = [
+                'total'       => $h['total'],
+                'dinas'       => $h['dinas'],
+                'hadir'       => $h['hadir'],
+                'terlambat'   => $h['terlambat'],
+                'belum'       => $h['belum'],
+                'tidak_dinas' => $h['tidak_dinas'],
+                'persen'      => $persenHadir,
+            ];
 
-        $terlambat = $rosterHariIni->filter(function ($r) {
-            return $r->logAbsensi && ($r->logAbsensi->menit_terlambat ?? 0) > 0;
-        })->count();
+            // 1. Notifikasi lembur yang menunggu validasi
+            $pendingQuery = \App\Models\LogLembur::where('status_validasi', 'Pending');
+            if (!$isGlobal) {
+                if (empty($managedUnits)) {
+                    $pendingQuery->whereRaw('1 = 0');
+                } else {
+                    $pendingQuery->whereHas('user', function ($q) use ($managedUnits) {
+                        $q->whereIn('unit_kerja_id', $managedUnits);
+                    });
+                }
+            }
+            $pendingLemburCount = $pendingQuery->count();
 
-        $belumHadir = max(0, $totalJadwal - $hadir);
+            // 2. Feed log absensi terkini hari ini (6 aktivitas terbaru)
+            $recentQuery = LogAbsensi::select([
+                    'id', 'user_id', 'roster_id', 'tanggal_dinas', 'waktu_masuk', 'waktu_pulang',
+                    'menit_terlambat', 'status_kehadiran'
+                ])
+                ->with([
+                    'user:id,name,nik,unit_kerja_id',
+                    'user.unitKerja:id,nama_unit',
+                    'roster.shift:id,nama_shift'
+                ])
+                ->where(function ($q) use ($hariIni) {
+                    $q->whereDate('waktu_masuk', $hariIni)
+                      ->orWhere('tanggal_dinas', $hariIni);
+                })
+                ->whereNotNull('waktu_masuk')
+                ->latest('waktu_masuk');
 
-        // MENGIRIM VARIABEL KE VIEW DASHBOARD
-        return view('dashboard', compact('totalJadwal', 'hadir', 'terlambat', 'belumHadir', 'hariIni'));
+            if (!$isGlobal) {
+                if (empty($managedUnits)) {
+                    $recentQuery->whereRaw('1 = 0');
+                } else {
+                    $recentQuery->whereHas('user', function ($q) use ($managedUnits) {
+                        $q->whereIn('unit_kerja_id', $managedUnits);
+                    });
+                }
+            }
+            $recentAbsensi = $recentQuery->take(6)->get();
+        }
+
+        // Data Jadwal & Absensi Pribadi (Untuk Staf atau personal info user yang login)
+        $myJadwalHariIni = JadwalRoster::with(['shift', 'logAbsensi'])
+            ->where('user_id', $userLogin->id)
+            ->where('tanggal_dinas', $hariIni)
+            ->first();
+
+        $myJadwalBesok = JadwalRoster::with('shift')
+            ->where('user_id', $userLogin->id)
+            ->where('tanggal_dinas', Carbon::tomorrow()->toDateString())
+            ->first();
+
+        $startBulan = Carbon::today()->startOfMonth()->toDateString();
+        $endBulan   = Carbon::today()->endOfMonth()->toDateString();
+
+        $myRekap = [
+            'hadir'  => LogAbsensi::where('user_id', $userLogin->id)
+                ->whereBetween('tanggal_dinas', [$startBulan, $endBulan])
+                ->whereNotNull('waktu_masuk')
+                ->count(),
+            'telat'  => (int) LogAbsensi::where('user_id', $userLogin->id)
+                ->whereBetween('tanggal_dinas', [$startBulan, $endBulan])
+                ->sum('menit_terlambat'),
+            'lembur' => (float) \App\Models\LogLembur::where('user_id', $userLogin->id)
+                ->whereBetween('waktu_mulai_lembur', [$startBulan, $endBulan])
+                ->where('status_validasi', 'Disetujui')
+                ->sum('total_jam_lembur'),
+        ];
+
+        $myRecentAbsensi = LogAbsensi::with('roster.shift')
+            ->where('user_id', $userLogin->id)
+            ->latest('tanggal_dinas')
+            ->take(5)
+            ->get();
+
+        return view('dashboard', compact(
+            'userLogin',
+            'hariIni',
+            'salam',
+            'scopeLabel',
+            'canSeeManagement',
+            'summary',
+            'pendingLemburCount',
+            'recentAbsensi',
+            'myJadwalHariIni',
+            'myJadwalBesok',
+            'myRekap',
+            'myRecentAbsensi'
+        ));
     }
 
     private function kkCanSee($user)
@@ -138,6 +236,8 @@ class WebDashboardController extends Controller
             return response()->json(['can_see' => false]);
         }
         $h = $this->kkHitung($user);
+        $persenHadir = $h['dinas'] > 0 ? round(($h['hadir'] / $h['dinas']) * 100, 1) : 0;
+
         return response()->json([
             'can_see'     => true,
             'scope_label' => $this->kkIsGlobal($user)
@@ -149,6 +249,7 @@ class WebDashboardController extends Controller
             'terlambat'   => $h['terlambat'],
             'belum'       => $h['belum'],
             'tidak_dinas' => $h['tidak_dinas'],
+            'persen'      => $persenHadir,
         ]);
     }
 
@@ -180,14 +281,36 @@ class WebDashboardController extends Controller
                 break; // total
         }
 
+        $todayRosters = $this->kkRostersHariIni($user)->keyBy('user_id');
+
         $rows = $q->select(['id', 'name', 'nik', 'unit_kerja_id'])
             ->with('unitKerja:id,nama_unit')
+            ->orderBy('name', 'asc')
             ->get()
-            ->map(fn($x) => [
-                'nama' => $x->name,
-                'nik'  => $x->nik,
-                'unit' => $x->unitKerja?->nama_unit ?? '-',
-            ])->values();
+            ->map(function ($x) use ($todayRosters) {
+                $roster = $todayRosters->get($x->id);
+                $log = $roster?->logAbsensi;
+                $jamMasuk = $log?->waktu_masuk ? Carbon::parse($log->waktu_masuk)->format('H:i') : null;
+                $menitTelat = (int) ($log?->menit_terlambat ?? 0);
+                $shiftNama = $roster?->shift?->nama_shift ?? '-';
+
+                $statusText = 'Belum Absen';
+                if ($log && $log->waktu_masuk) {
+                    $statusText = $log->status_kehadiran ?: ($menitTelat > 0 ? 'Terlambat' : 'Tepat Waktu');
+                } elseif (!$roster) {
+                    $statusText = 'Tidak Dinas';
+                }
+
+                return [
+                    'nama'        => $x->name,
+                    'nik'         => $x->nik ?: '-',
+                    'unit'        => $x->unitKerja?->nama_unit ?? '-',
+                    'shift'       => $shiftNama,
+                    'jam_masuk'   => $jamMasuk,
+                    'menit_telat' => $menitTelat,
+                    'status'      => $statusText,
+                ];
+            })->values();
 
         return response()->json(['count' => $rows->count(), 'rows' => $rows]);
     }
