@@ -22,7 +22,7 @@ class UserDanAksesSeeder extends Seeder
             'email' => 'administrator@rumahsakit.com',
             'nomor_whatsapp' => '6285156759610',
             'unit_kerja_id' => $unitItId,
-            'password' => Hash::make('admin123'), // Pastikan diubah setelah login pertama
+            'password' => Hash::make(env('SEEDER_ADMIN_IT_PASSWORD', 'admin123')), // Pastikan diubah setelah login pertama
             'created_at' => now(),
             'updated_at' => now(),
         ]);

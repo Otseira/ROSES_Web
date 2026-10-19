@@ -33,6 +33,13 @@ class AuthController extends Controller
             ], 401);
         }
 
+        if (isset($user->is_active) && !$user->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akun Anda telah dinonaktifkan. Silakan hubungi administrator.',
+            ], 403);
+        }
+
         $user->tokens()->delete();
         $token = $user->createToken('auth_token')->plainTextToken;
 

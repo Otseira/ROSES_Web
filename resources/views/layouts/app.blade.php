@@ -53,9 +53,9 @@
             class="bg-primary text-slate-300 transition-all duration-300 flex flex-col shadow-2xl z-20 relative">
 
             @php
-            $pengaturanGlobal = \App\Models\PengaturanAplikasi::first();
-            // ✅ BARU: ambil role user sekali agar lebih rapi
-            $userRole = auth()->user()->role;
+            $pengaturanGlobal = \Illuminate\Support\Facades\Cache::remember('pengaturan_aplikasi_global', 86400, fn() => \App\Models\PengaturanAplikasi::first());
+            $currentUser = auth()->user();
+            $userRole = $currentUser->role;
             @endphp
 
             <div class="h-20 flex items-center justify-center border-b border-slate-800/50 px-4">
@@ -90,7 +90,7 @@
                     <span x-show="sidebarOpen">Dashboard</span>
                 </a>
 
-                @if(in_array($userRole, ['superadmin', 'hrd']))
+                @if(in_array($userRole, ['superadmin', 'hrd', 'direktur']))
                 <div x-show="sidebarOpen"
                     class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 mt-6 px-3">Master Data
                 </div>
@@ -108,27 +108,37 @@
                 </a>
                 @endif
 
-                {{-- ✅ PERUBAHAN 1: Tambahkan 'manajer' ke section Operasional & Laporan --}}
-                @if(in_array($userRole, ['superadmin', 'hrd', 'manajer', 'kepala_unit', 'penanggung_jawab']))
+                @if(in_array($userRole, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab']))
                 <div x-show="sidebarOpen"
                     class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 mt-6 px-3">Operasional &
                     Laporan</div>
 
-                {{-- ✅ PERUBAHAN 2: Tambahkan 'manajer' juga ke link Roster Jadwal --}}
-                @if(in_array($userRole, ['superadmin', 'hrd', 'manajer', 'kepala_unit', 'penanggung_jawab']))
                 <a href="/roster"
                     class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('roster*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
                     <i data-lucide="calendar-days"
                         class="w-5 h-5 {{ request()->is('roster*') ? 'text-accent' : 'text-slate-400' }}"></i>
                     <span x-show="sidebarOpen">Roster Jadwal</span>
                 </a>
-                @endif
+
+                <a href="/monitoring"
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('monitoring*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
+                    <i data-lucide="monitor"
+                        class="w-5 h-5 {{ request()->is('monitoring*') ? 'text-accent' : 'text-slate-400' }}"></i>
+                    <span x-show="sidebarOpen">Live Monitoring</span>
+                </a>
 
                 <a href="/laporan-payroll"
-                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('laporan-payroll*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('laporan-payroll*') && !request()->is('laporan-payroll/lembur*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
                     <i data-lucide="calculator"
-                        class="w-5 h-5 {{ request()->is('laporan-payroll*') ? 'text-accent' : 'text-slate-400' }}"></i>
-                    <span x-show="sidebarOpen">Rekap Laporan</span>
+                        class="w-5 h-5 {{ request()->is('laporan-payroll*') && !request()->is('laporan-payroll/lembur*') ? 'text-accent' : 'text-slate-400' }}"></i>
+                    <span x-show="sidebarOpen">Rekap Absensi</span>
+                </a>
+
+                <a href="/laporan-payroll/lembur"
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('laporan-payroll/lembur*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
+                    <i data-lucide="clock-alert"
+                        class="w-5 h-5 {{ request()->is('laporan-payroll/lembur*') ? 'text-accent' : 'text-slate-400' }}"></i>
+                    <span x-show="sidebarOpen">Rekap Lembur / On-Call</span>
                 </a>
                 @endif
 
@@ -136,6 +146,12 @@
                 <div x-show="sidebarOpen"
                     class="text-xs font-semibold text-rose-400 uppercase tracking-wider mb-4 mt-6 px-3">Super Admin
                 </div>
+                <a href="/hak-akses"
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('hak-akses*') ? 'bg-rose-500/10 text-rose-400 font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
+                    <i data-lucide="shield-check"
+                        class="w-5 h-5 {{ request()->is('hak-akses*') ? 'text-rose-400' : 'text-slate-400' }}"></i>
+                    <span x-show="sidebarOpen">Hak Akses (ACL)</span>
+                </a>
                 <a href="/pengaturan"
                     class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('pengaturan*') ? 'bg-rose-500/10 text-rose-400 font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
                     <i data-lucide="settings"

@@ -13,5 +13,7 @@ class PengaturanAplikasi extends Model
         'logo',
         'nama_instansi',
         'tagline',
+        'splash_bg',
+        'splash_bg_color',
     ];
 }

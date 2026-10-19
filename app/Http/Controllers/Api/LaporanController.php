@@ -78,17 +78,21 @@ class LaporanController extends Controller
             ->withCount([
                 // Menghitung jumlah hari hadir langsung di level database query
                 'logAbsensis as total_hadir' => function ($query) use ($startDate, $endDate) {
-                    $query->whereHas('roster', function ($q) use ($startDate, $endDate) {
-                        $q->whereBetween('tanggal_dinas', [$startDate, $endDate]);
+                    $query->where(function ($q) use ($startDate, $endDate) {
+                        $q->whereHas('roster', fn($rq) => $rq->whereBetween('tanggal_dinas', [$startDate, $endDate]))
+                          ->orWhereBetween('waktu_masuk', [$startDate, $endDate]);
                     })->whereNotNull('waktu_masuk');
                 },
-                // Menghitung total akumulasi menit terlambat langsung di database
-                'logAbsensis as total_menit_terlambat' => function ($query) use ($startDate, $endDate) {
-                    $query->whereHas('roster', function ($q) use ($startDate, $endDate) {
-                        $q->whereBetween('tanggal_dinas', [$startDate, $endDate]);
-                    })->select(DB::raw('SUM(menit_terlambat)'));
-                }
             ])
+            // Menghitung total akumulasi menit terlambat langsung di database
+            ->withSum([
+                'logAbsensis as total_menit_terlambat' => function ($query) use ($startDate, $endDate) {
+                    $query->where(function ($q) use ($startDate, $endDate) {
+                        $q->whereHas('roster', fn($rq) => $rq->whereBetween('tanggal_dinas', [$startDate, $endDate]))
+                          ->orWhereBetween('waktu_masuk', [$startDate, $endDate]);
+                    });
+                }
+            ], 'menit_terlambat')
             // Menghitung total jam lembur yang disetujui langsung di database
             ->withSum([
                 'logLemburs as total_jam_lembur' => function ($query) use ($startDate, $endDate) {

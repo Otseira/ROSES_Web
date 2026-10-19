@@ -8,20 +8,41 @@ use Illuminate\Http\Request;
 
 class WebShiftController extends Controller
 {
-    /** Daftar master shift + unit terkait */
-    public function index()
+    private function authorizeShiftManager(Request $request): void
     {
-        $shifts = MasterShift::with('unitKerja')
+        if (!$request->user()->canManageUsers()) {
+            abort(403, 'Akses ditolak. Anda tidak memiliki izin untuk mengelola master shift.');
+        }
+    }
+
+    /** Daftar master shift + unit terkait */
+    public function index(Request $request)
+    {
+        $userLogin = $request->user();
+        $query = MasterShift::with('unitKerja')
             ->orderBy('unit_kerja_id')
-            ->orderBy('jam_masuk')
-            ->get();
+            ->orderBy('jam_masuk');
+
+        if (!$userLogin->hasGlobalAccess()) {
+            $managedUnits = $userLogin->managesUnits()->pluck('master_unit_kerja_id')->toArray();
+            if ($userLogin->unit_kerja_id && !in_array($userLogin->unit_kerja_id, $managedUnits)) {
+                $managedUnits[] = $userLogin->unit_kerja_id;
+            }
+            $query->where(function ($q) use ($managedUnits) {
+                $q->whereNull('unit_kerja_id')
+                  ->orWhereIn('unit_kerja_id', $managedUnits);
+            });
+        }
+
+        $shifts = $query->get();
 
         return view('shift.index', compact('shifts'));
     }
 
     /** Form tambah shift */
-    public function create()
+    public function create(Request $request)
     {
+        $this->authorizeShiftManager($request);
         $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
 
         return view('shift.create', compact('units'));
@@ -30,11 +51,13 @@ class WebShiftController extends Controller
     /** Simpan shift baru */
     public function store(Request $request)
     {
+        $this->authorizeShiftManager($request);
+
         $request->validate([
             'nama_shift'  => 'required|string|max:100',
-            'jam_masuk'   => 'required',
-            'jam_pulang'  => 'required',
-            'toleransi_terlambat_menit' => 'nullable|integer|min:0',
+            'jam_masuk'   => 'required|string|regex:/^\d{2}:\d{2}(:\d{2})?$/',
+            'jam_pulang'  => 'required|string|regex:/^\d{2}:\d{2}(:\d{2})?$/',
+            'toleransi_terlambat_menit' => 'nullable|integer|min:0|max:120',
             'unit_kerja_id' => 'nullable|exists:master_unit_kerjas,id',
         ]);
 
@@ -50,8 +73,9 @@ class WebShiftController extends Controller
     }
 
     /** Form edit shift */
-    public function edit($id)
+    public function edit(Request $request, $id)
     {
+        $this->authorizeShiftManager($request);
         $shift = MasterShift::findOrFail($id);
         $units = MasterUnitKerja::orderBy('nama_unit', 'asc')->get();
 
@@ -61,13 +85,14 @@ class WebShiftController extends Controller
     /** Update shift */
     public function update(Request $request, $id)
     {
+        $this->authorizeShiftManager($request);
         $shift = MasterShift::findOrFail($id);
 
         $request->validate([
             'nama_shift'  => 'required|string|max:100',
-            'jam_masuk'   => 'required',
-            'jam_pulang'  => 'required',
-            'toleransi_terlambat_menit' => 'nullable|integer|min:0',
+            'jam_masuk'   => 'required|string|regex:/^\d{2}:\d{2}(:\d{2})?$/',
+            'jam_pulang'  => 'required|string|regex:/^\d{2}:\d{2}(:\d{2})?$/',
+            'toleransi_terlambat_menit' => 'nullable|integer|min:0|max:120',
             'unit_kerja_id' => 'nullable|exists:master_unit_kerjas,id',
         ]);
 
@@ -83,8 +108,9 @@ class WebShiftController extends Controller
     }
 
     /** Hapus shift (dicegah jika masih dipakai roster) */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
+        $this->authorizeShiftManager($request);
         $shift = MasterShift::findOrFail($id);
 
         if ($shift->rosters()->exists()) {

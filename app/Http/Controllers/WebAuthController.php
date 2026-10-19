@@ -67,8 +67,8 @@ class WebAuthController extends Controller
             ])->withInput($request->only('login'));
         }
 
-        // 5. Cek Status Akun Aktif (Aman: hanya mengecek jika kolom is_active ada di database)
-        if (property_exists($user, 'is_active') && !$user->is_active) {
+        // 5. Cek Status Akun Aktif
+        if (isset($user->is_active) && !$user->is_active) {
             Log::warning('Percobaan login ditolak (Akun nonaktif)', [
                 'user_id' => $user->id,
                 'nik' => $user->nik,

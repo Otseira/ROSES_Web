@@ -20,9 +20,9 @@ class LemburController extends Controller
     {
         $request->validate([
             'keterangan'   => 'required|string|max:500',
-            'latitude'     => 'required|numeric',
-            'longitude'    => 'required|numeric',
-            'foto_masuk'   => 'required|image|mimes:jpeg,png,jpg|max:2048',
+            'latitude'     => 'required|numeric|between:-90,90',
+            'longitude'    => 'required|numeric|between:-180,180',
+            'foto_masuk'   => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
             'durasi_menit' => 'nullable|integer|min:1|max:720',
         ]);
 
@@ -144,9 +144,9 @@ class LemburController extends Controller
     {
         $request->validate([
             'keterangan' => 'required|string|max:500',
-            'latitude'   => 'required|numeric',
-            'longitude'  => 'required|numeric',
-            'foto_masuk' => 'required|image|mimes:jpeg,png,jpg|max:2048',
+            'latitude'   => 'required|numeric|between:-90,90',
+            'longitude'  => 'required|numeric|between:-180,180',
+            'foto_masuk' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
         ]);
 
         $user = $request->user()->load('unitKerja');
@@ -212,9 +212,9 @@ class LemburController extends Controller
     public function clockOutOnCall(Request $request)
     {
         $request->validate([
-            'latitude'    => 'required|numeric',
-            'longitude'   => 'required|numeric',
-            'foto_keluar' => 'required|image|mimes:jpeg,png,jpg|max:2048',
+            'latitude'    => 'required|numeric|between:-90,90',
+            'longitude'   => 'required|numeric|between:-180,180',
+            'foto_keluar' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
         ]);
 
         $user = $request->user()->load('unitKerja');
@@ -338,7 +338,7 @@ class LemburController extends Controller
     public function listValidasi(Request $request)
     {
         $user = $request->user();
-        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'hrd', 'superadmin', 'direktur'];
+        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'hrd', 'superadmin', 'direktur'];
         if (!in_array($user->role, $roleAllowed)) {
             return response()->json(['success' => false, 'message' => 'Tidak memiliki hak akses.'], 403);
         }
@@ -349,7 +349,7 @@ class LemburController extends Controller
             $query->where('status_validasi', $request->status);
         }
 
-        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab'])) {
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
             $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
             if ($unitIds->isEmpty()) {
                 $unitIds = collect([$user->unit_kerja_id]);
@@ -367,7 +367,7 @@ class LemburController extends Controller
     public function prosesValidasi(Request $request, $id)
     {
         $user = $request->user();
-        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'hrd', 'superadmin', 'direktur'];
+        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'hrd', 'superadmin', 'direktur'];
         if (!in_array($user->role, $roleAllowed)) {
             return response()->json(['success' => false, 'message' => 'Tidak memiliki hak akses.'], 403);
         }
@@ -396,7 +396,7 @@ class LemburController extends Controller
 
         $lembur = LogLembur::with('user')->findOrFail($id);
 
-        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab'])) {
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
             $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
             if ($unitIds->isEmpty()) {
                 $unitIds = collect([$user->unit_kerja_id]);

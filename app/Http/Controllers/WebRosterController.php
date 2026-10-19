@@ -9,6 +9,7 @@ use App\Models\MasterShift;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class WebRosterController extends Controller
@@ -126,6 +127,9 @@ class WebRosterController extends Controller
                 'user_valid'      => $validUserIds,
             ]);
 
+            // Preload shift map sekali saja untuk mencegah ribuan query N+1
+            $shiftMap = MasterShift::all()->keyBy('id');
+
             // ===== VALIDASI ANTI-TUMPUK antar sesi =====
             foreach ($entries as $userId => $dates) {
                 if (!in_array($userId, $validUserIds)) continue;
@@ -133,8 +137,8 @@ class WebRosterController extends Controller
                 foreach ($dates as $tanggal => $sesiMap) {
                     if (!isset($sesiMap[1], $sesiMap[2])) continue;
 
-                    $t1 = $this->waktuSesiDariInput($sesiMap[1]);
-                    $t2 = $this->waktuSesiDariInput($sesiMap[2]);
+                    $t1 = $this->waktuSesiDariInput($sesiMap[1], $shiftMap);
+                    $t2 = $this->waktuSesiDariInput($sesiMap[2], $shiftMap);
 
                     if (!$t1 || !$t2) continue;
 
@@ -154,63 +158,57 @@ class WebRosterController extends Controller
                 }
             }
 
-            // ===== SIMPAN per sesi (hanya yang disentuh) =====
+            // ===== SIMPAN per sesi (hanya yang disentuh) dalam Transaksi DB =====
             $countShift = 0;
             $countAbsen = 0;
 
-            foreach ($entries as $userId => $dates) {
-                if (!in_array($userId, $validUserIds)) continue;
+            DB::transaction(function () use ($entries, $validUserIds, &$countShift, &$countAbsen) {
+                foreach ($entries as $userId => $dates) {
+                    if (!in_array($userId, $validUserIds)) continue;
 
-                foreach ($dates as $tanggal => $sesiMap) {
-                    foreach ([1, 2] as $sesi) {
-                        // ✅ SEL TIDAK DISENTUH → lewati (tanpa query apa pun)
-                        if (!array_key_exists($sesi, $sesiMap)) continue;
+                    foreach ($dates as $tanggal => $sesiMap) {
+                        foreach ([1, 2] as $sesi) {
+                            // ✅ SEL TIDAK DISENTUH → lewati (tanpa query apa pun)
+                            if (!array_key_exists($sesi, $sesiMap)) continue;
 
-                        $d = $sesiMap[$sesi];
+                            $d = $sesiMap[$sesi];
 
-                        // ✅ KEY ADA TAPI KOSONG → hapus jadwal sesi ini
-                        $kosong = is_array($d)
-                            ? (empty($d['shiftId']) && empty($d['customMasuk']))
-                            : (empty($d) && $d !== '0');
+                            // ✅ KEY ADA TAPI KOSONG → hapus jadwal sesi ini
+                            $kosong = is_array($d)
+                                ? (empty($d['shiftId']) && empty($d['customMasuk']))
+                                : (empty($d) && $d !== '0');
 
-                        if ($kosong) {
-                            $deleted = JadwalRoster::where('user_id', $userId)
-                                ->where('tanggal_dinas', $tanggal)
-                                ->where('sesi', $sesi)
-                                ->delete();
+                            if ($kosong) {
+                                $deleted = JadwalRoster::where('user_id', $userId)
+                                    ->where('tanggal_dinas', $tanggal)
+                                    ->where('sesi', $sesi)
+                                    ->delete();
 
-                            if ($deleted) {
-                                $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, null);
+                                if ($deleted) {
+                                    $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, null);
+                                }
+                                continue;
                             }
-                            continue;
+
+                            // ✅ KEY BERISI → tulis jadwal
+                            $shiftId = empty($d['customMasuk']) ? $d['shiftId'] : null;
+
+                            $roster = JadwalRoster::updateOrCreate(
+                                ['user_id' => $userId, 'tanggal_dinas' => $tanggal, 'sesi' => $sesi],
+                                [
+                                    'shift_id'          => $shiftId,
+                                    'custom_jam_masuk'  => $d['customMasuk'],
+                                    'custom_jam_pulang' => $d['customPulang'],
+                                    'custom_nama_shift' => $d['customNama'],
+                                ]
+                            );
+                            $countShift++;
+
+                            $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, $roster);
                         }
-
-                        // ✅ KEY BERISI → tulis jadwal
-                        $shiftId = empty($d['customMasuk']) ? $d['shiftId'] : null;
-
-                        $roster = JadwalRoster::updateOrCreate(
-                            ['user_id' => $userId, 'tanggal_dinas' => $tanggal, 'sesi' => $sesi],
-                            [
-                                'shift_id'          => $shiftId,
-                                'custom_jam_masuk'  => $d['customMasuk'],
-                                'custom_jam_pulang' => $d['customPulang'],
-                                'custom_nama_shift' => $d['customNama'],
-                            ]
-                        );
-                        $countShift++;
-
-                        Log::info('ROSTER-WRITE', [
-                            'user'   => (int) $userId,
-                            'tgl'    => $tanggal,
-                            'sesi'   => $sesi,
-                            'shift'  => $shiftId,
-                            'custom' => $d['customMasuk'],
-                        ]);
-
-                        $countAbsen += $this->sinkronkanAbsensi((int) $userId, $tanggal, $roster);
                     }
                 }
-            }
+            });
 
             $namaTersentuh = User::whereIn('id', array_map('intval', array_keys($entries)))
                 ->pluck('name')
@@ -236,13 +234,13 @@ class WebRosterController extends Controller
     }
 
     /** Ambil [jamMasuk, jamPulang] dari payload input (custom atau shift). */
-    private function waktuSesiDariInput(array $d): ?array
+    private function waktuSesiDariInput(array $d, $shiftMap = null): ?array
     {
         if (!empty($d['customMasuk']) && !empty($d['customPulang'])) {
             return [$d['customMasuk'], $d['customPulang']];
         }
         if (!empty($d['shiftId'])) {
-            $s = MasterShift::find($d['shiftId']);
+            $s = $shiftMap ? ($shiftMap[$d['shiftId']] ?? null) : MasterShift::find($d['shiftId']);
             if ($s) return [(string) $s->jam_masuk, (string) $s->jam_pulang];
         }
         return null;
@@ -274,25 +272,27 @@ class WebRosterController extends Controller
             ->get();
 
         $count = 0;
-        foreach ($prevRosters as $r) {
-            $day = (int) Carbon::parse($r->tanggal_dinas)->day;
-            if ($day > $targetDays) continue;
+        DB::transaction(function () use ($prevRosters, $targetDays, $tahun, $bulan, &$count) {
+            foreach ($prevRosters as $r) {
+                $day = (int) Carbon::parse($r->tanggal_dinas)->day;
+                if ($day > $targetDays) continue;
 
-            $tanggalBaru = sprintf('%04d-%02d-%02d', $tahun, $bulan, $day);
+                $tanggalBaru = sprintf('%04d-%02d-%02d', $tahun, $bulan, $day);
 
-            $roster = JadwalRoster::updateOrCreate(
-                ['user_id' => $r->user_id, 'tanggal_dinas' => $tanggalBaru, 'sesi' => $r->sesi],
-                [
-                    'shift_id'          => $r->shift_id,
-                    'custom_jam_masuk'  => $r->custom_jam_masuk,
-                    'custom_jam_pulang' => $r->custom_jam_pulang,
-                    'custom_nama_shift' => $r->custom_nama_shift,
-                ]
-            );
+                $roster = JadwalRoster::updateOrCreate(
+                    ['user_id' => $r->user_id, 'tanggal_dinas' => $tanggalBaru, 'sesi' => $r->sesi],
+                    [
+                        'shift_id'          => $r->shift_id,
+                        'custom_jam_masuk'  => $r->custom_jam_masuk,
+                        'custom_jam_pulang' => $r->custom_jam_pulang,
+                        'custom_nama_shift' => $r->custom_nama_shift,
+                    ]
+                );
 
-            $this->sinkronkanAbsensi((int) $r->user_id, $tanggalBaru, $roster);
-            $count++;
-        }
+                $this->sinkronkanAbsensi((int) $r->user_id, $tanggalBaru, $roster);
+                $count++;
+            }
+        });
 
         return response()->json([
             'success' => true,

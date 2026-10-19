@@ -385,6 +385,76 @@ class WebLaporanController extends Controller
             : ($log->menit_terlambat > 0 ? 'Terlambat' : 'Tepat Waktu');
     }
 
+    public function rekapLembur(Request $request)
+    {
+        $userLogin      = $request->user();
+        $allowedUnitIds = $this->getAllowedUnitIds($userLogin);
+
+        $bulan        = (int) $request->input('bulan', now()->month);
+        $tahun        = (int) $request->input('tahun', now()->year);
+        $statusFilter = $request->input('status', '');
+
+        $start = Carbon::createFromDate($tahun, $bulan, 1)->startOfDay();
+        $end   = $start->copy()->endOfMonth()->endOfDay();
+
+        $query = LogLembur::with(['user.unitKerja'])
+            ->whereBetween('waktu_mulai_lembur', [$start, $end]);
+
+        if ($allowedUnitIds !== null) {
+            $query->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+        }
+
+        $allInPeriod = (clone $query)->get();
+
+        $totalPengajuan    = $allInPeriod->count();
+        $totalJamDisetujui = (float) $allInPeriod->where('status_validasi', 'Disetujui')->sum('total_jam_lembur');
+        $jmlPending        = $allInPeriod->where('status_validasi', 'Pending')->count();
+
+        if (!empty($statusFilter)) {
+            $query->where('status_validasi', $statusFilter);
+        }
+
+        $lemburs = $query->orderByDesc('waktu_mulai_lembur')->get();
+
+        $pengaturan = PengaturanAplikasi::first();
+        $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
+        $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
+
+        $rows = $lemburs->map(function ($l) use ($lat, $lng) {
+            $jarak = '-';
+            if (is_numeric($l->latitude_masuk) && is_numeric($l->longitude_masuk)) {
+                $jarak = round($this->haversine($lat, $lng, (float) $l->latitude_masuk, (float) $l->longitude_masuk)) . ' m';
+            }
+
+            return [
+                'nama'       => $l->user?->name ?? '-',
+                'nik'        => $l->user?->nik ?? '-',
+                'unit'       => $l->user?->unitKerja?->nama_unit ?? '-',
+                'jenis'      => $l->jenis_lembur ?? '-',
+                'tanggal'    => optional($l->waktu_mulai_lembur)->format('d/m/Y') ?? '-',
+                'jam_masuk'  => optional($l->waktu_mulai_lembur)->format('H:i') ?? '-',
+                'jam_keluar' => optional($l->waktu_selesai_lembur)->format('H:i') ?? '-',
+                'durasi'     => $l->total_jam_lembur ? number_format($l->total_jam_lembur, 2, ',', '.') . ' jam' : '-',
+                'jarak'      => $jarak,
+                'status'     => $l->status_validasi,
+                'alasan'     => $l->keterangan ?? '-',
+            ];
+        });
+
+        $role = $userLogin->role;
+
+        return view('laporan.rekap-lembur', compact(
+            'role',
+            'totalPengajuan',
+            'totalJamDisetujui',
+            'jmlPending',
+            'bulan',
+            'tahun',
+            'statusFilter',
+            'rows'
+        ));
+    }
+
     private function haversine($lat1, $lon1, $lat2, $lon2): float
     {
         $R = 6371000;

@@ -17,7 +17,7 @@ class SuperAdminSeeder extends Seeder
                 'nik' => '000000', // NIK khusus/dummy untuk superadmin
                 'name' => 'Administrator',
                 'email' => 'admin@simrs.com',
-                'password' => Hash::make('rahasia123'),
+                'password' => Hash::make(env('SEEDER_SUPERADMIN_PASSWORD', 'rahasia123')),
                 'unit_kerja_id' => null, // Dibuat NULL karena tidak terikat unit manapun
                 'role' => 'superadmin',
                 'created_at' => now(),

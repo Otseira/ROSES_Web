@@ -11,8 +11,12 @@ class WebHakAksesController extends Controller
     /**
      * Menampilkan daftar semua pengguna beserta modul yang mereka miliki
      */
-    public function index()
+    public function index(Request $request)
     {
+        if (!$request->user()->isSuperadmin()) {
+            abort(403, 'Akses ditolak. Pengaturan hak akses hanya dapat dikelola oleh Super Administrator.');
+        }
+
         // Tarik data user beserta relasi unit kerja dan modulnya
         $users = User::with(['unitKerja', 'moduls'])->get();
         return view('hak-akses.index', compact('users'));
@@ -21,8 +25,12 @@ class WebHakAksesController extends Controller
     /**
      * Menampilkan formulir untuk mengubah hak akses 1 pengguna spesifik
      */
-    public function edit(User $user)
+    public function edit(Request $request, User $user)
     {
+        if (!$request->user()->isSuperadmin()) {
+            abort(403, 'Akses ditolak. Pengaturan hak akses hanya dapat dikelola oleh Super Administrator.');
+        }
+
         $moduls = MasterModul::all();
         return view('hak-akses.edit', compact('user', 'moduls'));
     }
@@ -32,6 +40,10 @@ class WebHakAksesController extends Controller
      */
     public function update(Request $request, User $user)
     {
+        if (!$request->user()->isSuperadmin()) {
+            abort(403, 'Akses ditolak. Pengaturan hak akses hanya dapat dikelola oleh Super Administrator.');
+        }
+
         // Validasi input array dari checkbox
         $request->validate([
             'moduls' => 'nullable|array',

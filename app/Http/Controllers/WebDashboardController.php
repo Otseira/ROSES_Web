@@ -14,30 +14,40 @@ class WebDashboardController extends Controller
         $userLogin = $request->user();
         $hariIni = Carbon::today()->toDateString();
 
-        // Cek wewenang
-        $isGlobal = $userLogin->role === 'superadmin';
+        // Cek wewenang global (Superadmin, HRD, Direktur)
+        $isGlobal = $userLogin->hasGlobalAccess();
 
         // 1. Ambil query roster jadwal hari ini
-        $queryJadwal = JadwalRoster::where('tanggal_dinas', $hariIni);
+        $queryJadwal = JadwalRoster::with('logAbsensi')->where('tanggal_dinas', $hariIni);
 
-        // Jika bukan superadmin, kunci jadwal hanya untuk unit kerja user yang login
+        // Jika bukan global access, kunci jadwal hanya untuk unit kerja yang dikelola
         if (!$isGlobal) {
-            $queryJadwal->whereHas('user', function ($q) use ($userLogin) {
-                $q->where('unit_kerja_id', $userLogin->unit_kerja_id);
-            });
+            $managedUnits = $userLogin->managesUnits()->pluck('master_unit_kerja_id')->toArray();
+            if ($userLogin->unit_kerja_id && !in_array($userLogin->unit_kerja_id, $managedUnits)) {
+                $managedUnits[] = $userLogin->unit_kerja_id;
+            }
+            if (empty($managedUnits)) {
+                $queryJadwal->whereRaw('1 = 0');
+            } else {
+                $queryJadwal->whereHas('user', function ($q) use ($managedUnits) {
+                    $q->whereIn('unit_kerja_id', $managedUnits);
+                });
+            }
         }
 
-        // 2. Kalkulasi Data Statistik
+        // 2. Kalkulasi Data Statistik (Eager Loaded, 1 Query)
         $rosterHariIni = $queryJadwal->get();
         $totalJadwal = $rosterHariIni->count();
-        $rosterIds = $rosterHariIni->pluck('id');
 
-        // Tarik log absensi yang berkaitan dengan roster hari ini
-        $logsAbsen = LogAbsensi::whereIn('roster_id', $rosterIds)->get();
+        $hadir = $rosterHariIni->filter(function ($r) {
+            return $r->logAbsensi && $r->logAbsensi->waktu_masuk !== null;
+        })->count();
 
-        $hadir = $logsAbsen->whereNotNull('waktu_masuk')->count();
-        $terlambat = $logsAbsen->where('menit_terlambat', '>', 0)->count();
-        $belumHadir = $totalJadwal - $hadir;
+        $terlambat = $rosterHariIni->filter(function ($r) {
+            return $r->logAbsensi && ($r->logAbsensi->menit_terlambat ?? 0) > 0;
+        })->count();
+
+        $belumHadir = max(0, $totalJadwal - $hadir);
 
         // MENGIRIM VARIABEL KE VIEW DASHBOARD
         return view('dashboard', compact('totalJadwal', 'hadir', 'terlambat', 'belumHadir', 'hariIni'));
@@ -45,19 +55,23 @@ class WebDashboardController extends Controller
 
     private function kkCanSee($user)
     {
-        return in_array($user->role, ['superadmin', 'hrd', 'kepala_unit', 'penanggung_jawab']);
+        return in_array($user->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab']);
     }
 
     private function kkIsGlobal($user)
     {
-        return in_array($user->role, ['superadmin', 'hrd']);
+        return $user->hasGlobalAccess();
     }
 
     private function kkScopeUsers($user)
     {
         return \App\Models\User::where('role', '!=', 'superadmin')
             ->when(!$this->kkIsGlobal($user), function ($q) use ($user) {
-                $q->where('unit_kerja_id', $user->unit_kerja_id);
+                $managed = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
+                if ($user->unit_kerja_id && !in_array($user->unit_kerja_id, $managed)) {
+                    $managed[] = $user->unit_kerja_id;
+                }
+                $q->whereIn('unit_kerja_id', $managed);
             });
     }
 
@@ -66,8 +80,12 @@ class WebDashboardController extends Controller
         return \App\Models\JadwalRoster::with(['shift', 'user.unitKerja', 'logAbsensi'])
             ->where('tanggal_dinas', now()->toDateString())
             ->when(!$this->kkIsGlobal($user), function ($q) use ($user) {
-                $q->whereHas('user', function ($u) use ($user) {
-                    $u->where('unit_kerja_id', $user->unit_kerja_id);
+                $managed = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
+                if ($user->unit_kerja_id && !in_array($user->unit_kerja_id, $managed)) {
+                    $managed[] = $user->unit_kerja_id;
+                }
+                $q->whereHas('user', function ($u) use ($managed) {
+                    $u->whereIn('unit_kerja_id', $managed);
                 });
             })
             ->get();

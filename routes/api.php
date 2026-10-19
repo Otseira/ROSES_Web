@@ -12,7 +12,7 @@ use App\Http\Controllers\Api\PengaturanController;
 // ===================================================================
 // RUTE PUBLIK (Bisa diakses dari Flutter tanpa harus login)
 // ===================================================================
-Route::post('/login',    [AuthController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 Route::get('/branding',  [PengaturanController::class, 'branding']);
 
 // ===================================================================

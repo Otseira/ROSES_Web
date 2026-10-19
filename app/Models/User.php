@@ -76,16 +76,9 @@ class User extends Authenticatable
         return $this->hasMany(LogLembur::class, 'user_id');
     }
 
-    public function logAbsensis(): HasManyThrough
+    public function logAbsensis(): HasMany
     {
-        return $this->hasManyThrough(
-            LogAbsensi::class,
-            JadwalRoster::class,
-            'user_id',
-            'roster_id',
-            'id',
-            'id'
-        );
+        return $this->hasMany(LogAbsensi::class, 'user_id');
     }
 
     public function logLemburs(): HasMany
@@ -137,6 +130,14 @@ class User extends Authenticatable
     public function isSuperadmin(): bool
     {
         return $this->role === 'superadmin';
+    }
+
+    /**
+     * Cek apakah user memiliki hak kelola data pegawai
+     */
+    public function canManageUsers(): bool
+    {
+        return in_array($this->role, ['superadmin', 'hrd', 'direktur']);
     }
 
     /**

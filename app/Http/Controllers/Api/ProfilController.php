@@ -16,6 +16,12 @@ class ProfilController extends Controller
 
         $request->validate([
             'nama'           => 'nullable|string|max:255',
+            'nik'            => [
+                'nullable',
+                'string',
+                'max:20',
+                Rule::unique('users', 'nik')->ignore($user->id),
+            ],
             'username'       => [
                 'required',
                 'string',
@@ -33,7 +39,7 @@ class ProfilController extends Controller
             'nomor_whatsapp' => 'nullable|string|max:20',
         ]);
 
-        if ($request->filled('nik')) {
+        if ($request->has('nik')) {
             $user->nik = $request->nik;
         }
 
@@ -43,10 +49,12 @@ class ProfilController extends Controller
         $user->nomor_whatsapp = $request->nomor_whatsapp;
         $user->save();
 
+        $user->load('unitKerja');
+
         return response()->json([
             'success' => true,
             'message' => 'Profil berhasil diperbarui.',
-            'data'    => $this->formatUser($user->fresh()),
+            'data'    => $this->formatUser($user),
         ], 200);
     }
 

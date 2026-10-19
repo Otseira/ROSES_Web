@@ -19,9 +19,9 @@ class AbsensiController extends Controller
     public function clockIn(Request $request)
     {
         $request->validate([
-            'latitude'  => 'required|numeric',
-            'longitude' => 'required|numeric',
-            'foto'      => 'nullable|image|max:3072',
+            'latitude'  => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'foto'      => 'nullable|image|mimes:jpeg,png,jpg,webp|max:3072',
         ]);
 
         $user  = $request->user();
@@ -75,13 +75,18 @@ class AbsensiController extends Controller
             if ($malam) $rostersHariIni = collect([$malam]);
         }
 
+        // Pre-query sesi yang sudah diabsen hari ini untuk mencegah query berulang dalam loop (N+1)
+        $usedRosterIds = $rostersHariIni->isNotEmpty()
+            ? LogAbsensi::whereIn('roster_id', $rostersHariIni->pluck('id'))
+                ->whereNotNull('waktu_masuk')
+                ->pluck('roster_id')
+                ->all()
+            : [];
+
         // ===== 3) Cari sesi TARGET: dalam jendela & belum diabsen =====
         $target = null;
         foreach ($rostersHariIni as $r) {
-            $sudahDipakai = LogAbsensi::where('roster_id', $r->id)
-                ->whereNotNull('waktu_masuk')
-                ->exists();
-            if ($sudahDipakai) continue;
+            if (in_array($r->id, $usedRosterIds)) continue;
 
             [$winStart, $winEnd] = self::jendelaSesi($r);
 
@@ -96,10 +101,7 @@ class AbsensiController extends Controller
         if (!$target) {
             $sesiAkanDatang = null;
             foreach ($rostersHariIni as $r) {
-                $sudahDipakai = LogAbsensi::where('roster_id', $r->id)
-                    ->whereNotNull('waktu_masuk')
-                    ->exists();
-                if ($sudahDipakai) continue;
+                if (in_array($r->id, $usedRosterIds)) continue;
 
                 [$winStart,] = self::jendelaSesi($r);
                 if ($now->lt($winStart)) {
@@ -143,6 +145,7 @@ class AbsensiController extends Controller
         $log = LogAbsensi::create([
             'user_id'          => $user->id,
             'roster_id'        => $target?->id,
+            'tanggal_dinas'    => $target?->tanggal_dinas ?? $today,
             'waktu_masuk'      => $now,
             'latitude_masuk'   => $request->latitude,
             'longitude_masuk'  => $request->longitude,
@@ -177,9 +180,9 @@ class AbsensiController extends Controller
     public function clockOut(Request $request)
     {
         $request->validate([
-            'latitude'  => 'required|numeric',
-            'longitude' => 'required|numeric',
-            'foto'      => 'nullable|image|max:3072',
+            'latitude'  => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'foto'      => 'nullable|image|mimes:jpeg,png,jpg,webp|max:3072',
         ]);
 
         $user = $request->user();

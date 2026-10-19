@@ -125,33 +125,34 @@ class RosterController extends Controller
             }
         }
 
+        // === VALIDASI KEAMANAN SEKALIGUS (Mencegah N+1 Query dalam loop) ===
+        $targetUserIds = array_values(array_unique(array_column($request->roster_data, 'user_id')));
+        $validUserIds  = User::whereIn('id', $targetUserIds)
+            ->when($allowedUnitIds !== null, function ($query) use ($allowedUnitIds) {
+                $query->whereIn('unit_kerja_id', $allowedUnitIds);
+            })
+            ->pluck('id')
+            ->toArray();
+
+        $invalidUsers = array_diff($targetUserIds, $validUserIds);
+        if (!empty($invalidUsers)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Pelanggaran akses. Anda mencoba mengisi jadwal untuk pegawai di luar unit kerja yang Anda kelola.',
+            ], 403);
+        }
+
         DB::beginTransaction();
 
         try {
             foreach ($request->roster_data as $data) {
-
-                // === VALIDASI KEAMANAN (Apakah staf ini bawahan yang sah?) ===
-                $isBawahan = User::where('id', $data['user_id'])
-                    ->when($allowedUnitIds !== null, function ($query) use ($allowedUnitIds) {
-                        $query->whereIn('unit_kerja_id', $allowedUnitIds);
-                    })
-                    ->exists();
-
-                if (!$isBawahan) {
-                    DB::rollBack();
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Pelanggaran akses. Anda mencoba mengisi jadwal untuk pegawai di luar unit kerja yang Anda kelola.',
-                    ], 403);
-                }
-
                 JadwalRoster::updateOrCreate(
                     [
-                        'user_id' => $data['user_id'],
+                        'user_id'       => $data['user_id'],
                         'tanggal_dinas' => $data['tanggal'],
                     ],
                     [
-                        'shift_id' => $data['shift_id'],
+                        'shift_id'      => $data['shift_id'],
                     ]
                 );
             }

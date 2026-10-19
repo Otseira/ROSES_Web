@@ -10,6 +10,7 @@ class LogAbsensi extends Model
     protected $fillable = [
         'user_id',
         'roster_id',
+        'tanggal_dinas',
         'waktu_masuk',
         'waktu_pulang',
         'latitude_masuk',
@@ -25,6 +26,7 @@ class LogAbsensi extends Model
     ];
 
     protected $casts = [
+        'tanggal_dinas' => 'date',
         'waktu_masuk'  => 'datetime',
         'waktu_pulang' => 'datetime',
     ];
