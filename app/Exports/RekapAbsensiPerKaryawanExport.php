@@ -57,17 +57,20 @@ class RekapAbsensiPerKaryawanExport implements ExcelExport, WithMultipleSheets
     private function emptySummary(): array
     {
         return [
+            'total_masuk_dinas'     => 0,
             'total_lembur_menit'    => 0,
             'total_oncall_menit'    => 0,
             'total_terlambat_menit' => 0,
             'terlambat_6_10'        => 0,
             'terlambat_11_15'       => 0,
-            'terlambat_16_20'       => 0,
-            'terlambat_21plus'      => 0,
-            'potongan_6_10'         => 0,
-            'potongan_11_15'        => 0,
-            'potongan_16_20'        => 0,
-            'total_potongan'        => 0,
+            'terlambat_16plus'      => 0,
+            'jumlah_6_10'           => 0,
+            'jumlah_11_15'          => 0,
+            'jumlah_16plus'         => 0,
+            'rupiah_6_10'           => 0,
+            'rupiah_11_15'          => 0,
+            'rupiah_16plus'         => 0,
+            'total_potongan_rupiah' => 0,
         ];
     }
 

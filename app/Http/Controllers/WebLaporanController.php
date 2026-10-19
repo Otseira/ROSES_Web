@@ -96,115 +96,35 @@ class WebLaporanController extends Controller
         }
 
         [$startDate, $endDate] = $this->resolveDateRange($tglMulai, $tglSelesai);
-        [$logs, $lemburs]      = $this->buildData($startDate, $endDate, $unit, $allowedUnitIds);
+        [$calendarData, $periodDates] = $this->buildCalendarData($startDate, $endDate, $unit, $allowedUnitIds);
 
         $periodLabel = Carbon::parse($startDate)->translatedFormat('d M Y')
             . ' s/d ' . Carbon::parse($endDate)->translatedFormat('d M Y');
 
-        // ===== Kelompokkan absensi per karyawan =====
-        $grouped = $logs->groupBy(function ($log) {
-            $user = $log->user ?? $log->roster?->user;
-            return $user?->id ?? ('log-' . $log->id);
-        });
-
         $sheetsData = [];
-        foreach ($grouped as $userId => $groupLogs) {
-            $first = $groupLogs->first();
-            $user  = $first->user ?? $first->roster?->user;
-
-            // === Hitung summary per karyawan ===
-            $totalLemburMenit    = 0;
-            $totalOncallMenit    = 0;
-            $totalTerlambatMenit = 0;
-
-            $terlambat6_10   = 0;
-            $jumlah6_10   = 0;
-            $terlambat11_15  = 0;
-            $jumlah11_15  = 0;
-            $terlambat16plus = 0;
-            $jumlah16plus = 0;
-
+        foreach ($calendarData as $empData) {
             $rows = [];
-            foreach ($groupLogs as $log) {
-                $key   = ($log->user_id ?? $log->roster?->user_id) . '|' . optional($log->waktu_masuk)->toDateString();
-                $items = $lemburs->get($key);
-
-                $mLembur = 0;
-                $mOncall = 0;
-                if ($items) {
-                    foreach ($items as $l) {
-                        $mnt  = (float) ($l->total_jam_lembur ?? 0) * 60;
-                        $norm = str_contains(
-                            strtolower(str_replace(['-', ' ', '_'], '', $l->jenis_lembur ?? '')),
-                            'oncall'
-                        );
-                        $norm ? $mOncall += $mnt : $mLembur += $mnt;
-                    }
-                }
-
-                $totalLemburMenit += $mLembur;
-                $totalOncallMenit += $mOncall;
-
-                // ===== Kategorikan keterlambatan =====
-                $mntTerlambat = (int) ($log->menit_terlambat ?? 0);
-                $totalTerlambatMenit += $mntTerlambat;
-
-                if ($mntTerlambat >= 6 && $mntTerlambat <= 10) {
-                    $terlambat6_10 += $mntTerlambat;
-                    $jumlah6_10++;
-                } elseif ($mntTerlambat >= 11 && $mntTerlambat <= 15) {
-                    $terlambat11_15 += $mntTerlambat;
-                    $jumlah11_15++;
-                } elseif ($mntTerlambat >= 16) {
-                    $terlambat16plus += $mntTerlambat;
-                    $jumlah16plus++;   // ✅ semua ≥16 digabung
-                }
-
+            foreach ($empData['days'] as $day) {
                 $rows[] = [
-                    optional($log->waktu_masuk)->format('d/m/Y') ?? '-',
-                    optional($log->waktu_masuk)->format('H:i') ?? '-',
-                    optional($log->waktu_pulang)->format('H:i') ?? '-',
-                    $log->durasi_kerja ?? '-',
-                    $log->status_kehadiran ?? '-',
-                    $mntTerlambat,
-                    $log->jarak ?? '-',
-                    (int) round($mLembur),
-                    (int) round($mOncall),
+                    $day['tanggal'],
+                    $day['jam_masuk'],
+                    $day['jam_keluar'],
+                    $day['durasi'],
+                    $day['menit_telat'],
+                    $day['jarak'],
+                    $day['lembur_menit'] > 0 ? $day['lembur_menit'] : 0,
+                    $day['oncall_menit'] > 0 ? $day['oncall_menit'] : 0,
+                    $day['masuk_dinas'],
                 ];
             }
 
-            // ===== Hitung potongan =====
-            // ✅ POTONGAN RUPIAH: 25.000 × persentase × jumlah kejadian
-            $rupiah6_10   = (int) round($jumlah6_10   * 25000 * 0.25);   // Rp 6.250 / kejadian
-            $rupiah11_15  = (int) round($jumlah11_15  * 25000 * 0.50);   // Rp 12.500 / kejadian
-            $rupiah16plus = (int) round($jumlah16plus * 25000 * 1.00);   // Rp 25.000 / kejadian
-            $totalPotonganRupiah = $rupiah6_10 + $rupiah11_15 + $rupiah16plus;
-
             $sheetsData[] = [
-                'nama' => $user?->name ?? 'Tanpa Nama',
-                'unit' => $user?->unitKerja?->nama_unit ?? '-',
-                'rows' => $rows,
-                'summary' => [
-                    'total_lembur_menit'    => (int) round($totalLemburMenit),
-                    'total_oncall_menit'    => (int) round($totalOncallMenit),
-                    'total_terlambat_menit' => $totalTerlambatMenit,
-                    // ✅ Struktur baru: 3 kategori + rupiah
-                    'terlambat_6_10'        => $terlambat6_10,
-                    'jumlah_6_10'           => $jumlah6_10,
-                    'rupiah_6_10'           => $rupiah6_10,
-                    'terlambat_11_15'       => $terlambat11_15,
-                    'jumlah_11_15'          => $jumlah11_15,
-                    'rupiah_11_15'          => $rupiah11_15,
-                    'terlambat_16plus'      => $terlambat16plus,
-                    'jumlah_16plus'         => $jumlah16plus,
-                    'rupiah_16plus'         => $rupiah16plus,
-                    'total_potongan_rupiah' => $totalPotonganRupiah,
-                ],
+                'nama'    => $empData['nama'],
+                'unit'    => $empData['unit'],
+                'rows'    => $rows,
+                'summary' => $empData['summary'],
             ];
         }
-
-        // Urutkan sheet sesuai abjad nama
-        usort($sheetsData, fn($a, $b) => strcasecmp($a['nama'], $b['nama']));
 
         $filename = 'rekap-absensi-'
             . Carbon::parse($startDate)->format('Y-m-d') . '-'
@@ -232,25 +152,44 @@ class WebLaporanController extends Controller
         }
 
         [$startDate, $endDate] = $this->resolveDateRange($tglMulai, $tglSelesai);
-        [$logs, $lemburs] = $this->buildData($startDate, $endDate, $unit, $allowedUnitIds);
+        [$calendarData, $periodDates] = $this->buildCalendarData($startDate, $endDate, $unit, $allowedUnitIds);
 
         $bulan = Carbon::parse($startDate)->month;
         $tahun = Carbon::parse($startDate)->year;
+        $periodLabel = Carbon::parse($startDate)->translatedFormat('d M Y')
+            . ' s/d ' . Carbon::parse($endDate)->translatedFormat('d M Y');
+
+        $unitNama = null;
+        if ($unit) {
+            $unitModel = MasterUnitKerja::find($unit);
+            $unitNama  = $unitModel ? $unitModel->nama_unit : null;
+        }
+
+        $grandTotalMasukDinas = array_sum(array_column($calendarData, 'total_masuk_dinas'));
+        $grandTotalTerlambat  = array_sum(array_column(array_column($calendarData, 'summary'), 'total_terlambat_menit'));
+        $grandTotalLembur     = array_sum(array_column($calendarData, 'total_lembur_menit'));
+        $grandTotalOncall     = array_sum(array_column($calendarData, 'total_oncall_menit'));
 
         return view('laporan.pdf', compact(
             'bulan',
             'tahun',
-            'logs',
-            'lemburs',
+            'calendarData',
+            'periodDates',
+            'periodLabel',
             'tglMulai',
             'tglSelesai',
             'startDate',
-            'endDate'
+            'endDate',
+            'unitNama',
+            'grandTotalMasukDinas',
+            'grandTotalTerlambat',
+            'grandTotalLembur',
+            'grandTotalOncall'
         ));
     }
 
     /**
-     * ✅ Rentang tanggal: pakai input user; jika kosong → 1 bulan berjalan s/d hari ini.
+     * ✅ Rentang tanggal: pakai input user; jika kosong → 1 bulan penuh s/d akhir bulan.
      */
     private function resolveDateRange(?string $tglMulai, ?string $tglSelesai): array
     {
@@ -262,9 +201,202 @@ class WebLaporanController extends Controller
         }
 
         return [
-            now()->startOfMonth()->toDateTimeString(),
-            now()->endOfDay()->toDateTimeString(),
+            now()->startOfMonth()->startOfDay()->toDateTimeString(),
+            now()->endOfMonth()->endOfDay()->toDateTimeString(),
         ];
+    }
+
+    /**
+     * Membangun data matriks kalender penuh harian per karyawan (untuk Cetak PDF & Excel).
+     * Seluruh tanggal dalam sebulan / rentang dipilih tetap ditampilkan.
+     * Hari tanpa absen / jadwal dibuat strip (-).
+     * Disertai kolom / penghitungan total masuk dinas.
+     */
+    private function buildCalendarData(string $startDate, string $endDate, $unit = null, ?array $allowedUnitIds = null): array
+    {
+        [$logs, $lemburs] = $this->buildData($startDate, $endDate, $unit, $allowedUnitIds);
+
+        // Ambil daftar karyawan dalam scope
+        $userQuery = \App\Models\User::select(['id', 'name', 'nik', 'unit_kerja_id'])
+            ->with('unitKerja:id,nama_unit')
+            ->where('role', '!=', 'superadmin');
+
+        if ($unit) {
+            $userQuery->where('unit_kerja_id', $unit);
+        } elseif ($allowedUnitIds !== null) {
+            $userQuery->whereIn('unit_kerja_id', $allowedUnitIds);
+        }
+
+        $scopedUsers = $userQuery->orderBy('name', 'asc')->get();
+        $userMap = $scopedUsers->keyBy('id');
+
+        // Pastikan karyawan yang memiliki log absensi juga terdaftar
+        foreach ($logs as $log) {
+            $u = $log->user ?? $log->roster?->user;
+            if ($u && !$userMap->has($u->id)) {
+                $userMap->put($u->id, $u);
+            }
+        }
+
+        $allEmployees = $userMap->values()->sortBy('name');
+
+        // Buat daftar tanggal lengkap dari startDate s/d endDate
+        $startCarbon = Carbon::parse($startDate)->startOfDay();
+        $endCarbon   = Carbon::parse($endDate)->startOfDay();
+
+        $periodDates = [];
+        $curr = $startCarbon->copy();
+        while ($curr->lte($endCarbon)) {
+            $periodDates[] = $curr->copy();
+            $curr->addDay();
+        }
+
+        // Petakan log absensi per user_id dan tanggal (Y-m-d)
+        $logsByUserAndDate = [];
+        foreach ($logs as $log) {
+            $uId = $log->user_id ?? $log->roster?->user_id;
+            if (!$uId) continue;
+            $d = $log->tanggal_dinas
+                ? Carbon::parse($log->tanggal_dinas)->format('Y-m-d')
+                : optional($log->waktu_masuk)->format('Y-m-d');
+            if ($d) {
+                $logsByUserAndDate[$uId][$d][] = $log;
+            }
+        }
+
+        $calendarData = [];
+
+        foreach ($allEmployees as $emp) {
+            $totalMasukDinas     = 0;
+            $totalLemburMenit    = 0;
+            $totalOncallMenit    = 0;
+            $totalTerlambatMenit = 0;
+
+            $terlambat6_10   = 0;
+            $jumlah6_10      = 0;
+            $terlambat11_15  = 0;
+            $jumlah11_15     = 0;
+            $terlambat16plus = 0;
+            $jumlah16plus    = 0;
+
+            $days = [];
+
+            foreach ($periodDates as $dateObj) {
+                $dStr = $dateObj->format('Y-m-d');
+                $dayLogs = $logsByUserAndDate[$emp->id][$dStr] ?? [];
+
+                // Hitung lembur/oncall hari ini
+                $keyLembur = $emp->id . '|' . $dStr;
+                $itemsLembur = $lemburs->get($keyLembur);
+
+                $mLembur = 0;
+                $mOncall = 0;
+                if ($itemsLembur) {
+                    foreach ($itemsLembur as $l) {
+                        $mnt  = (float) ($l->total_jam_lembur ?? 0) * 60;
+                        $norm = str_contains(
+                            strtolower(str_replace(['-', ' ', '_'], '', $l->jenis_lembur ?? '')),
+                            'oncall'
+                        );
+                        $norm ? $mOncall += $mnt : $mLembur += $mnt;
+                    }
+                }
+                $totalLemburMenit += $mLembur;
+                $totalOncallMenit += $mOncall;
+
+                if (!empty($dayLogs)) {
+                    $log = $dayLogs[0];
+                    $isHadir = !empty($log->waktu_masuk);
+
+                    if ($isHadir) {
+                        $totalMasukDinas++;
+                    }
+
+                    $mntTerlambat = (int) ($log->menit_terlambat ?? 0);
+                    $totalTerlambatMenit += $mntTerlambat;
+
+                    if ($mntTerlambat >= 6 && $mntTerlambat <= 10) {
+                        $terlambat6_10 += $mntTerlambat;
+                        $jumlah6_10++;
+                    } elseif ($mntTerlambat >= 11 && $mntTerlambat <= 15) {
+                        $terlambat11_15 += $mntTerlambat;
+                        $jumlah11_15++;
+                    } elseif ($mntTerlambat >= 16) {
+                        $terlambat16plus += $mntTerlambat;
+                        $jumlah16plus++;
+                    }
+
+                    $days[] = [
+                        'tanggal'      => $dateObj->format('d/m/Y'),
+                        'tanggal_raw'  => $dStr,
+                        'hari'         => $dateObj->translatedFormat('l'),
+                        'jam_masuk'    => optional($log->waktu_masuk)->format('H:i') ?? '-',
+                        'jam_keluar'   => optional($log->waktu_pulang)->format('H:i') ?? '-',
+                        'durasi'       => $log->durasi_kerja ?? '-',
+                        'status'       => $log->status_kehadiran ?? '-',
+                        'menit_telat'  => $mntTerlambat,
+                        'jarak'        => $log->jarak !== null ? $log->jarak . ' m' : '-',
+                        'lembur_menit' => (int) round($mLembur),
+                        'oncall_menit' => (int) round($mOncall),
+                        'masuk_dinas'  => $isHadir ? 'Hadir' : '-',
+                        'is_hadir'     => $isHadir,
+                    ];
+                } else {
+                    // Hari tanpa absen / jadwal -> Dibuat strip (-) sesuai permintaan
+                    $days[] = [
+                        'tanggal'      => $dateObj->format('d/m/Y'),
+                        'tanggal_raw'  => $dStr,
+                        'hari'         => $dateObj->translatedFormat('l'),
+                        'jam_masuk'    => '-',
+                        'jam_keluar'   => '-',
+                        'durasi'       => '-',
+                        'status'       => '-',
+                        'menit_telat'  => '-',
+                        'jarak'        => '-',
+                        'lembur_menit' => (int) round($mLembur),
+                        'oncall_menit' => (int) round($mOncall),
+                        'masuk_dinas'  => '-',
+                        'is_hadir'     => false,
+                    ];
+                }
+            }
+
+            // Hitung potongan rupiah
+            $rupiah6_10   = (int) round($jumlah6_10   * 25000 * 0.25);
+            $rupiah11_15  = (int) round($jumlah11_15  * 25000 * 0.50);
+            $rupiah16plus = (int) round($jumlah16plus * 25000 * 1.00);
+            $totalPotonganRupiah = $rupiah6_10 + $rupiah11_15 + $rupiah16plus;
+
+            $calendarData[] = [
+                'user_id'              => $emp->id,
+                'nama'                 => $emp->name ?? 'Tanpa Nama',
+                'nik'                  => $emp->nik ?? '-',
+                'unit'                 => $emp->unitKerja?->nama_unit ?? '-',
+                'total_masuk_dinas'    => $totalMasukDinas,
+                'total_lembur_menit'   => (int) round($totalLemburMenit),
+                'total_oncall_menit'   => (int) round($totalOncallMenit),
+                'total_terlambat_menit'=> $totalTerlambatMenit,
+                'days'                 => $days,
+                'summary'              => [
+                    'total_masuk_dinas'     => $totalMasukDinas,
+                    'total_lembur_menit'    => (int) round($totalLemburMenit),
+                    'total_oncall_menit'    => (int) round($totalOncallMenit),
+                    'total_terlambat_menit' => $totalTerlambatMenit,
+                    'terlambat_6_10'        => $terlambat6_10,
+                    'jumlah_6_10'           => $jumlah6_10,
+                    'rupiah_6_10'           => $rupiah6_10,
+                    'terlambat_11_15'       => $terlambat11_15,
+                    'jumlah_11_15'          => $jumlah11_15,
+                    'rupiah_11_15'          => $rupiah11_15,
+                    'terlambat_16plus'      => $terlambat16plus,
+                    'jumlah_16plus'         => $jumlah16plus,
+                    'rupiah_16plus'         => $rupiah16plus,
+                    'total_potongan_rupiah' => $totalPotonganRupiah,
+                ],
+            ];
+        }
+
+        return [$calendarData, $periodDates];
     }
 
     private function getAllowedUnitIds($user): ?array
