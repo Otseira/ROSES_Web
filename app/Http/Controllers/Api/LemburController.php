@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\LogLembur;
+use App\Models\PengambilanLembur;
 use App\Models\LogAbsensi;
 use App\Models\JadwalRoster;
 use App\Models\PengaturanAplikasi;
@@ -370,6 +371,10 @@ class LemburController extends Controller
             $query->where('status_validasi', $request->status);
         }
 
+        if ($request->filled('jenis_lembur') && $request->jenis_lembur !== 'Semua') {
+            $query->where('jenis_lembur', $request->jenis_lembur);
+        }
+
         if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
             $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
             if ($unitIds->isEmpty()) {
@@ -441,6 +446,252 @@ class LemburController extends Controller
             'success' => true,
             'message' => 'Lembur berhasil divalidasi: ' . $map[$norm] . '.',
             'data'    => $this->normalizeLembur($lembur->load('user.unitKerja')),
+        ], 200);
+    }
+
+    // ===================================================================
+    // BANK JAM LEMBUR & PENGAMBILAN WAKTU (KOMPENSASI JAM KERJA)
+    // ===================================================================
+
+    /**
+     * Cek Saldo Bank Jam Lembur pegawai (tersedia & terpakai).
+     */
+    public function getBankJam(Request $request)
+    {
+        $user = $request->user()->load('unitKerja');
+
+        // Total menit lembur yang telah disetujui (Ekstensi & On-Call)
+        $earnedMinutes = (int) round(
+            LogLembur::where('user_id', $user->id)
+                ->where('status_validasi', 'Disetujui')
+                ->sum('total_jam_lembur') * 60
+        );
+
+        // Total menit yang sudah diambil & disetujui
+        $usedMinutes = (int) PengambilanLembur::where('user_id', $user->id)
+            ->where('status_validasi', 'Disetujui')
+            ->sum('durasi_menit');
+
+        // Total menit yang sedang diajukan (Pending)
+        $pendingMinutes = (int) PengambilanLembur::where('user_id', $user->id)
+            ->where('status_validasi', 'Pending')
+            ->sum('durasi_menit');
+
+        $saldoBersihMenit   = max(0, $earnedMinutes - $usedMinutes);
+        $saldoTersediaMenit = max(0, $saldoBersihMenit - $pendingMinutes);
+
+        $jamBersih       = intdiv($saldoBersihMenit, 60);
+        $sisaMenitBersih = $saldoBersihMenit % 60;
+        $teksSaldoBersih = ($jamBersih > 0 ? "{$jamBersih} jam " : '') . "{$sisaMenitBersih} menit";
+
+        $jamTersedia       = intdiv($saldoTersediaMenit, 60);
+        $sisaMenitTersedia = $saldoTersediaMenit % 60;
+        $teksSaldoTersedia = ($jamTersedia > 0 ? "{$jamTersedia} jam " : '') . "{$sisaMenitTersedia} menit";
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'is_ganti_jam'          => ($user->unitKerja?->jenis_lembur ?? 'dibayar') === 'ganti_jam',
+                'kebijakan_lembur'      => $user->unitKerja?->jenis_lembur ?? 'dibayar',
+                'unit_nama'             => $user->unitKerja?->nama_unit ?? '-',
+                'total_menit_diperoleh' => $earnedMinutes,
+                'total_menit_digunakan' => $usedMinutes,
+                'total_menit_pending'   => $pendingMinutes,
+                'saldo_menit_bersih'    => $saldoBersihMenit,
+                'saldo_menit_tersedia'  => $saldoTersediaMenit,
+                'saldo_bersih_teks'     => trim($teksSaldoBersih) ?: '0 menit',
+                'saldo_tersedia_teks'   => trim($teksSaldoTersedia) ?: '0 menit',
+            ],
+        ], 200);
+    }
+
+    /**
+     * Pegawai mengajukan pengambilan waktu lembur (masuk diperlambat / pulang dipercepat).
+     */
+    public function storePengambilanJam(Request $request)
+    {
+        $request->validate([
+            'tanggal_dinas'    => 'required|date|after_or_equal:today',
+            'tipe_pengambilan' => 'required|in:masuk_diperlambat,pulang_dipercepat',
+            'durasi_menit'     => 'required|integer|min:15|max:480',
+            'keterangan'       => 'required|string|max:500',
+        ]);
+
+        $user = $request->user()->load('unitKerja');
+
+        if (($user->unitKerja?->jenis_lembur ?? 'dibayar') !== 'ganti_jam') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unit kerja Anda menerapkan sistem lembur dibayar, tidak dapat mengajukan pengambilan jam.',
+            ], 422);
+        }
+
+        // Hitung saldo tersedia
+        $earnedMinutes = (int) round(
+            LogLembur::where('user_id', $user->id)
+                ->where('status_validasi', 'Disetujui')
+                ->sum('total_jam_lembur') * 60
+        );
+        $usedMinutes = (int) PengambilanLembur::where('user_id', $user->id)
+            ->where('status_validasi', 'Disetujui')
+            ->sum('durasi_menit');
+        $pendingMinutes = (int) PengambilanLembur::where('user_id', $user->id)
+            ->where('status_validasi', 'Pending')
+            ->sum('durasi_menit');
+
+        $saldoTersedia = max(0, $earnedMinutes - $usedMinutes - $pendingMinutes);
+
+        if ($request->durasi_menit > $saldoTersedia) {
+            $jam   = intdiv($saldoTersedia, 60);
+            $menit = $saldoTersedia % 60;
+            $teks  = ($jam > 0 ? "{$jam} jam " : '') . "{$menit} menit";
+            return response()->json([
+                'success' => false,
+                'message' => "Saldo jam lembur tidak mencukupi. Sisa saldo yang dapat diajukan: " . (trim($teks) ?: '0 menit') . ".",
+            ], 422);
+        }
+
+        // Cegah duplikasi di tanggal dan tipe yang sama jika masih Pending / Disetujui
+        $cekAda = PengambilanLembur::where('user_id', $user->id)
+            ->whereDate('tanggal_dinas', $request->tanggal_dinas)
+            ->where('tipe_pengambilan', $request->tipe_pengambilan)
+            ->whereIn('status_validasi', ['Pending', 'Disetujui'])
+            ->exists();
+
+        if ($cekAda) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anda sudah memiliki pengajuan pengambilan jam aktif untuk tanggal dinas tersebut.',
+            ], 422);
+        }
+
+        $pengambilan = PengambilanLembur::create([
+            'user_id'          => $user->id,
+            'tanggal_dinas'    => $request->tanggal_dinas,
+            'tipe_pengambilan' => $request->tipe_pengambilan,
+            'durasi_menit'     => $request->durasi_menit,
+            'keterangan'       => $request->keterangan,
+            'status_validasi'  => 'Pending',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Pengajuan pengambilan waktu lembur berhasil dikirim dan menunggu persetujuan atasan.',
+            'data'    => $this->normalizePengambilanJam($pengambilan->load('user.unitKerja')),
+        ], 200);
+    }
+
+    /**
+     * Riwayat pengajuan pengambilan waktu lembur milik pegawai sendiri.
+     */
+    public function riwayatPengambilanJam(Request $request)
+    {
+        $user = $request->user();
+
+        $query = PengambilanLembur::with(['user.unitKerja', 'validator'])
+            ->where('user_id', $user->id)
+            ->latest('tanggal_dinas');
+
+        if ($request->filled('status') && $request->status !== 'Semua') {
+            $query->where('status_validasi', $request->status);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data'    => $query->get()->map(fn($p) => $this->normalizePengambilanJam($p)),
+        ], 200);
+    }
+
+    /**
+     * Daftar validasi pengambilan waktu lembur untuk atasan.
+     */
+    public function listValidasiPengambilanJam(Request $request)
+    {
+        $user = $request->user();
+        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'hrd', 'superadmin', 'direktur'];
+        if (!in_array($user->role, $roleAllowed)) {
+            return response()->json(['success' => false, 'message' => 'Tidak memiliki hak akses.'], 403);
+        }
+
+        $query = PengambilanLembur::with(['user.unitKerja', 'validator'])->latest('created_at');
+
+        if ($request->filled('status')) {
+            $query->where('status_validasi', $request->status);
+        }
+
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+            $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
+            if ($unitIds->isEmpty()) {
+                $unitIds = collect([$user->unit_kerja_id]);
+            }
+            $query->whereHas('user', fn($q) => $q->whereIn('unit_kerja_id', $unitIds));
+        }
+
+        return response()->json([
+            'success' => true,
+            'data'    => $query->get()->map(fn($p) => $this->normalizePengambilanJam($p)),
+        ], 200);
+    }
+
+    /**
+     * Proses validasi pengajuan pengambilan waktu lembur oleh atasan.
+     */
+    public function prosesValidasiPengambilanJam(Request $request, $id)
+    {
+        $user = $request->user();
+        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'hrd', 'superadmin', 'direktur'];
+        if (!in_array($user->role, $roleAllowed)) {
+            return response()->json(['success' => false, 'message' => 'Tidak memiliki hak akses.'], 403);
+        }
+
+        $raw  = $request->input('status')
+            ?? $request->input('status_validasi')
+            ?? $request->input('action')
+            ?? $request->input('nilai');
+        $norm = strtolower(trim((string) $raw));
+
+        $map = [
+            'disetujui' => 'Disetujui',
+            'setujui'   => 'Disetujui',
+            'approve'   => 'Disetujui',
+            'approved'  => 'Disetujui',
+            'terima'    => 'Disetujui',
+            'ditolak'   => 'Ditolak',
+            'tolak'     => 'Ditolak',
+            'reject'    => 'Ditolak',
+            'rejected'  => 'Ditolak',
+        ];
+
+        if (!isset($map[$norm])) {
+            return response()->json(['success' => false, 'message' => 'Status validasi tidak dikenali. Kirim status: Disetujui / Ditolak.'], 422);
+        }
+
+        $pengambilan = PengambilanLembur::with('user')->findOrFail($id);
+
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+            $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
+            if ($unitIds->isEmpty()) {
+                $unitIds = collect([$user->unit_kerja_id]);
+            }
+            if (!in_array($pengambilan->user->unit_kerja_id, $unitIds->all())) {
+                return response()->json(['success' => false, 'message' => 'Bukan unit yang Anda kelola.'], 403);
+            }
+        }
+
+        if (!in_array($pengambilan->status_validasi, ['Menunggu', 'Pending'])) {
+            return response()->json(['success' => false, 'message' => 'Pengajuan sudah divalidasi sebelumnya.'], 422);
+        }
+
+        $pengambilan->status_validasi  = $map[$norm];
+        $pengambilan->catatan_validasi = $request->input('catatan_validasi') ?? $request->input('catatan');
+        $pengambilan->divalidasi_oleh  = $user->id;
+        $pengambilan->divalidasi_pada  = now();
+        $pengambilan->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Pengambilan waktu lembur berhasil divalidasi: ' . $map[$norm] . '.',
+            'data'    => $this->normalizePengambilanJam($pengambilan->load(['user.unitKerja', 'validator'])),
         ], 200);
     }
 
@@ -550,6 +801,47 @@ class LemburController extends Controller
                 'foto'        => $fotoProfil,
                 'foto_profil' => $fotoProfil,
             ] : null,
+        ]);
+    }
+
+    private function normalizePengambilanJam(PengambilanLembur $p): array
+    {
+        $user      = $p->user;
+        $unit      = $user?->unitKerja;
+        $validator = $p->validator;
+
+        $nama     = $user?->name ?? '-';
+        $nik      = $user?->nik ?? '-';
+        $unitNama = $unit?->nama_unit ?? '-';
+
+        $fotoProfil = null;
+        if ($user) {
+            $pathFoto = $user->foto_profil ?? $user->foto ?? null;
+            $fotoProfil = $pathFoto ? url('storage/' . $pathFoto) : null;
+        }
+
+        $jamFormat  = intdiv($p->durasi_menit, 60);
+        $sisaMenit  = $p->durasi_menit % 60;
+        $durasiTeks = ($jamFormat > 0 ? "{$jamFormat} jam " : '') . ($sisaMenit > 0 ? "{$sisaMenit} menit" : '');
+
+        return array_merge($p->toArray(), [
+            'pegawai_nama'        => $nama,
+            'pegawai_nik'         => $nik,
+            'unit_nama'           => $unitNama,
+            'nama'                => $nama,
+            'nama_karyawan'       => $nama,
+            'nama_pegawai'        => $nama,
+            'unit'                => $unitNama,
+            'unit_kerja'          => $unitNama,
+            'nama_unit'           => $unitNama,
+            'tanggal'             => $p->tanggal_dinas ? Carbon::parse($p->tanggal_dinas)->format('d/m/Y') : '-',
+            'tanggal_iso'         => $p->tanggal_dinas ? Carbon::parse($p->tanggal_dinas)->format('Y-m-d') : null,
+            'durasi_teks'         => trim($durasiTeks) ?: "{$p->durasi_menit} menit",
+            'tipe_label'          => $p->tipe_pengambilan === 'masuk_diperlambat' ? 'Jam Masuk Diperlambat' : 'Jam Pulang Dipercepat',
+            'status'              => $p->status_validasi,
+            'foto_profil'         => $fotoProfil,
+            'validator_nama'      => $validator?->name,
+            'divalidasi_pada_fmt' => $p->divalidasi_pada ? $p->divalidasi_pada->format('d/m/Y H:i') : null,
         ]);
     }
 

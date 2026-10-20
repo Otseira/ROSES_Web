@@ -301,7 +301,17 @@ class AbsensiController extends Controller
 
         $selisih   = (int) floor($expected->diffInMinutes($log->waktu_masuk, false));
 
-        $log->menit_terlambat = ($selisih > $toleransi) ? (int) $selisih : 0;
+        // ✅ Cek apakah ada kompensasi jam masuk diperlambat (Time-Off in Lieu) yang telah disetujui
+        $kompensasiMasuk = \App\Models\PengambilanLembur::where('user_id', $log->user_id)
+            ->whereDate('tanggal_dinas', $tanggalStr)
+            ->where('tipe_pengambilan', 'masuk_diperlambat')
+            ->where('status_validasi', 'Disetujui')
+            ->first();
+
+        $menitKompensasi = $kompensasiMasuk ? (int) $kompensasiMasuk->durasi_menit : 0;
+        $totalToleransi  = $toleransi + $menitKompensasi;
+
+        $log->menit_terlambat = ($selisih > $totalToleransi) ? (int) ($selisih - $menitKompensasi) : 0;
 
         $log->status_kehadiran = $log->menit_terlambat > 0
             ? 'Terlambat'

@@ -47,6 +47,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/lembur/validasi/{id}',   [LemburController::class, 'prosesValidasi']);
     Route::get('/lembur/oncall-aktif',     [LemburController::class, 'onCallAktif']);
 
+    // Bank Jam Lembur & Kompensasi Waktu (Time-Off in Lieu)
+    Route::get('/lembur/bank-jam',                   [LemburController::class, 'getBankJam']);
+    Route::post('/lembur/ambil-jam',                 [LemburController::class, 'storePengambilanJam']);
+    Route::get('/lembur/riwayat-ambil-jam',          [LemburController::class, 'riwayatPengambilanJam']);
+    Route::get('/lembur/validasi-pengambilan',       [LemburController::class, 'listValidasiPengambilanJam']);
+    Route::post('/lembur/validasi-pengambilan/{id}', [LemburController::class, 'prosesValidasiPengambilanJam']);
+
     Route::post('/lembur/oncall',          [LemburController::class, 'clockInOnCall']);
     Route::post('/lembur/oncall/masuk',    [LemburController::class, 'clockInOnCall']);
     Route::post('/lembur/oncall/keluar',   [LemburController::class, 'clockOutOnCall']);

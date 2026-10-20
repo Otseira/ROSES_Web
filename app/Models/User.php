@@ -86,6 +86,11 @@ class User extends Authenticatable
         return $this->hasMany(LogLembur::class, 'user_id');
     }
 
+    public function pengambilanLemburs(): HasMany
+    {
+        return $this->hasMany(PengambilanLembur::class, 'user_id');
+    }
+
     // ===== RELASI BARU: Unit yang Dikelola (Multi-Unit) =====
 
     public function managesUnits(): BelongsToMany
