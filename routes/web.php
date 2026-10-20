@@ -8,6 +8,7 @@ use App\Http\Controllers\WebMonitoringController;
 use App\Http\Controllers\WebLaporanController;
 use App\Http\Controllers\WebPegawaiController;
 use App\Http\Controllers\WebShiftController;
+use App\Http\Controllers\WebUnitKerjaController;
 use App\Http\Controllers\WebHakAksesController;
 use App\Http\Controllers\WebPengaturanController;
 
@@ -50,6 +51,7 @@ Route::middleware('auth')->group(function () {
     // 4. Master Data
     Route::resource('master-pegawai', WebPegawaiController::class, ['names' => 'master-pegawai']);
     Route::resource('master-shift', WebShiftController::class, ['names' => 'master-shift']);
+    Route::resource('master-unit', WebUnitKerjaController::class, ['names' => 'master-unit']);
 
     // 5. Hak Akses (Role Management)
     Route::get('/hak-akses', [WebHakAksesController::class, 'index'])->name('hak-akses.index');

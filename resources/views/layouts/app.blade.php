@@ -111,6 +111,12 @@
                         class="w-5 h-5 {{ request()->is('master-shift*') ? 'text-accent' : 'text-slate-400' }}"></i>
                     <span x-show="sidebarOpen">Master Shift</span>
                 </a>
+                <a href="/master-unit"
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 {{ request()->is('master-unit*') ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-slate-800 hover:text-white' }}">
+                    <i data-lucide="building-2"
+                        class="w-5 h-5 {{ request()->is('master-unit*') ? 'text-accent' : 'text-slate-400' }}"></i>
+                    <span x-show="sidebarOpen">Data Unit Kerja</span>
+                </a>
                 @endif
 
                 @if(in_array($userRole, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab']))
