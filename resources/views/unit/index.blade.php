@@ -9,7 +9,7 @@
     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
             <h3 class="text-xl font-extrabold text-slate-800">Daftar Unit Kerja</h3>
-            <p class="text-sm text-slate-500 mt-1">Kelola departemen, instalasi, dan unit kerja operasional rumah sakit.</p>
+            <p class="text-sm text-slate-500 mt-1">Kelola departemen, instalasi, dan kebijakan lembur unit operasional rumah sakit.</p>
         </div>
         <a href="{{ route('master-unit.create') }}"
             class="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-md transition-all active:scale-95 flex items-center gap-2">
@@ -64,6 +64,7 @@
                     <th class="px-5 py-4 w-16 text-center">No</th>
                     <th class="px-5 py-4">Nama Unit Kerja</th>
                     <th class="px-5 py-4">Deskripsi / Keterangan</th>
+                    <th class="px-5 py-4 text-center">Kebijakan Lembur</th>
                     <th class="px-5 py-4 text-center">Jumlah Pegawai</th>
                     <th class="px-5 py-4 text-center w-28">Aksi</th>
                 </tr>
@@ -89,6 +90,19 @@
                         <span class="text-sm font-medium text-slate-600">
                             {{ $unit->deskripsi ?: '— Tidak ada keterangan —' }}
                         </span>
+                    </td>
+                    <td class="px-5 py-4 text-center">
+                        @if(($unit->jenis_lembur ?? 'dibayar') === 'ganti_jam')
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                            <i data-lucide="clock" class="w-3.5 h-3.5 text-amber-600"></i>
+                            Ganti Jam Kerja
+                        </span>
+                        @else
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <i data-lucide="banknote" class="w-3.5 h-3.5 text-emerald-600"></i>
+                            Lembur Dibayar
+                        </span>
+                        @endif
                     </td>
                     <td class="px-5 py-4 text-center">
                         <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold {{ $unit->users_count > 0 ? 'bg-sky-50 text-sky-700 border border-sky-100' : 'bg-slate-100 text-slate-400' }}">
@@ -118,7 +132,7 @@
                 </tr>
                 @empty
                 <tr>
-                    <td colspan="5" class="px-5 py-12 text-center text-sm font-bold text-slate-400">
+                    <td colspan="6" class="px-5 py-12 text-center text-sm font-bold text-slate-400">
                         <div class="flex flex-col items-center justify-center gap-2">
                             <i data-lucide="inbox" class="w-8 h-8 text-slate-300"></i>
                             <span>Belum ada data unit kerja yang ditemukan.</span>
@@ -143,4 +157,3 @@
     if (typeof lucide !== 'undefined') lucide.createIcons();
 </script>
 @endsection
-

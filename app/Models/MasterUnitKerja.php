@@ -13,7 +13,18 @@ class MasterUnitKerja extends Model
     protected $fillable = [
         'nama_unit',
         'deskripsi',
+        'jenis_lembur', // 'dibayar' atau 'ganti_jam'
     ];
+
+    public function isLemburDibayar(): bool
+    {
+        return ($this->jenis_lembur ?? 'dibayar') === 'dibayar';
+    }
+
+    public function isGantiJam(): bool
+    {
+        return ($this->jenis_lembur ?? 'dibayar') === 'ganti_jam';
+    }
 
     // Relasi: Satu unit kerja memiliki banyak pegawai
     public function users(): HasMany

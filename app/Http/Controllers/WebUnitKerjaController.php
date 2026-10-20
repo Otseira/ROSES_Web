@@ -54,12 +54,15 @@ class WebUnitKerjaController extends Controller
         $this->authorizeAdminOrHrd($request);
 
         $validated = $request->validate([
-            'nama_unit' => 'required|string|max:100|unique:master_unit_kerjas,nama_unit',
-            'deskripsi' => 'nullable|string|max:500',
+            'nama_unit'    => 'required|string|max:100|unique:master_unit_kerjas,nama_unit',
+            'deskripsi'    => 'nullable|string|max:500',
+            'jenis_lembur' => 'required|in:dibayar,ganti_jam',
         ], [
-            'nama_unit.required' => 'Nama unit kerja wajib diisi.',
-            'nama_unit.unique'   => 'Nama unit kerja sudah terdaftar.',
-            'nama_unit.max'      => 'Nama unit kerja maksimal 100 karakter.',
+            'nama_unit.required'    => 'Nama unit kerja wajib diisi.',
+            'nama_unit.unique'      => 'Nama unit kerja sudah terdaftar.',
+            'nama_unit.max'         => 'Nama unit kerja maksimal 100 karakter.',
+            'jenis_lembur.required' => 'Kebijakan lembur unit wajib dipilih.',
+            'jenis_lembur.in'       => 'Pilihan kebijakan lembur tidak valid.',
         ]);
 
         MasterUnitKerja::create($validated);
@@ -90,12 +93,15 @@ class WebUnitKerjaController extends Controller
         $unit = MasterUnitKerja::findOrFail($id);
 
         $validated = $request->validate([
-            'nama_unit' => "required|string|max:100|unique:master_unit_kerjas,nama_unit,{$id}",
-            'deskripsi' => 'nullable|string|max:500',
+            'nama_unit'    => "required|string|max:100|unique:master_unit_kerjas,nama_unit,{$id}",
+            'deskripsi'    => 'nullable|string|max:500',
+            'jenis_lembur' => 'required|in:dibayar,ganti_jam',
         ], [
-            'nama_unit.required' => 'Nama unit kerja wajib diisi.',
-            'nama_unit.unique'   => 'Nama unit kerja sudah terdaftar.',
-            'nama_unit.max'      => 'Nama unit kerja maksimal 100 karakter.',
+            'nama_unit.required'    => 'Nama unit kerja wajib diisi.',
+            'nama_unit.unique'      => 'Nama unit kerja sudah terdaftar.',
+            'nama_unit.max'         => 'Nama unit kerja maksimal 100 karakter.',
+            'jenis_lembur.required' => 'Kebijakan lembur unit wajib dipilih.',
+            'jenis_lembur.in'       => 'Pilihan kebijakan lembur tidak valid.',
         ]);
 
         $unit->update($validated);

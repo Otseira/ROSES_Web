@@ -67,6 +67,8 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'nomor_whatsapp' => $user->nomor_whatsapp,
                 'unit_kerja' => $user->unitKerja ? $user->unitKerja->nama_unit : null,
+                'unit_kerja_id' => $user->unit_kerja_id,
+                'jenis_lembur' => $user->unitKerja ? ($user->unitKerja->jenis_lembur ?? 'dibayar') : 'dibayar',
                 'role' => $user->role,
                 'foto_profil' => $user->foto_profil                       // ✅
                     ? rtrim((string) config('app.url'), '/') . '/storage/' . $user->foto_profil
@@ -107,6 +109,8 @@ class AuthController extends Controller
                 'email'          => $user->email,               // ✅ DITAMBAHKAN
                 'nomor_whatsapp' => $user->nomor_whatsapp,      // ✅ DITAMBAHKAN
                 'unit_kerja'     => $user->unitKerja ? $user->unitKerja->nama_unit : null,
+                'unit_kerja_id'  => $user->unit_kerja_id,
+                'jenis_lembur'   => $user->unitKerja ? ($user->unitKerja->jenis_lembur ?? 'dibayar') : 'dibayar',
                 'role'           => $user->role,
                 'foto_profil'    => $user->foto_profil          // ✅ DITAMBAHKAN (URL lengkap)
                     ? $base . '/storage/' . $user->foto_profil
