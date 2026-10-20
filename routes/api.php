@@ -39,12 +39,13 @@ Route::middleware('auth:sanctum')->group(function () {
     // ===================================================================
     // LEMBUR / ON-CALL (alur 1x tekan → form → foto → selesai otomatis)
     // ===================================================================
+    Route::get('/lembur/riwayat',          [LemburController::class, 'riwayatSaya']);
     Route::post('/lembur/ekstensi',        [LemburController::class, 'storeEkstensi']);
     Route::post('/lembur/oncall-masuk',    [LemburController::class, 'clockInOnCall']);
     Route::post('/lembur/oncall-keluar',   [LemburController::class, 'clockOutOnCall']);
     Route::get('/lembur/validasi',         [LemburController::class, 'listValidasi']);
     Route::post('/lembur/validasi/{id}',   [LemburController::class, 'prosesValidasi']);
-    Route::get('/lembur/oncall-aktif', [LemburController::class, 'onCallAktif']);
+    Route::get('/lembur/oncall-aktif',     [LemburController::class, 'onCallAktif']);
 
     Route::post('/lembur/oncall',          [LemburController::class, 'clockInOnCall']);
     Route::post('/lembur/oncall/masuk',    [LemburController::class, 'clockInOnCall']);

@@ -334,6 +334,27 @@ class LemburController extends Controller
         ], 200);
     }
 
+    /**
+     * Riwayat pengajuan lembur & on-call milik karyawan yang sedang login.
+     */
+    public function riwayatSaya(Request $request)
+    {
+        $user = $request->user();
+
+        $query = LogLembur::with('user.unitKerja')
+            ->where('user_id', $user->id)
+            ->latest('waktu_mulai_lembur');
+
+        if ($request->filled('status') && $request->status !== 'Semua') {
+            $query->where('status_validasi', $request->status);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data'    => $query->get()->map(fn($l) => $this->normalizeLembur($l)),
+        ], 200);
+    }
+
     /** List validasi untuk atasan — payload lengkap untuk aplikasi. */
     public function listValidasi(Request $request)
     {
