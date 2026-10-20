@@ -4,12 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Models\LogAbsensi;
 use App\Models\LogLembur;
+use App\Models\PengambilanLembur;
 use App\Models\MasterUnitKerja;
 use App\Models\PengaturanAplikasi;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\RekapAbsensiPerKaryawanExport;
+use App\Exports\RekapLemburExport;
 
 class WebLaporanController extends Controller
 {
@@ -541,80 +544,389 @@ class WebLaporanController extends Controller
         $bulan        = (int) $request->input('bulan', now()->month);
         $tahun        = (int) $request->input('tahun', now()->year);
         $statusFilter = $request->input('status', '');
+        $unitFilter   = $request->input('unit_id', '');
+        $tab          = $request->input('tab', 'dibayar'); // 'dibayar' | 'bank_jam' | 'pengambilan'
 
         $start = Carbon::createFromDate($tahun, $bulan, 1)->startOfDay();
         $end   = $start->copy()->endOfMonth()->endOfDay();
 
-        $baseQuery = LogLembur::query()
-            ->whereBetween('waktu_mulai_lembur', [$start, $end]);
+        // Dropdown Unit
+        $unitsQuery = MasterUnitKerja::orderBy('nama_unit', 'asc');
+        if ($allowedUnitIds !== null) {
+            $unitsQuery->whereIn('id', $allowedUnitIds);
+        }
+        $units = $unitsQuery->get();
+
+        // Radius RS untuk hitung jarak
+        $pengaturan = PengaturanAplikasi::select(['latitude', 'longitude'])->first();
+        $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
+        $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
+
+        // ==========================================
+        // 1. DATA TAB 1: LEMBUR BERBAYAR (PAYROLL)
+        // ==========================================
+        $qDibayar = LogLembur::query()
+            ->whereBetween('waktu_mulai_lembur', [$start, $end])
+            ->whereHas('user.unitKerja', function ($u) {
+                $u->where('jenis_lembur', 'dibayar');
+            });
 
         if ($allowedUnitIds !== null) {
-            $baseQuery->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+            $qDibayar->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+        }
+        if (!empty($unitFilter)) {
+            $qDibayar->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unitFilter));
         }
 
-        // Agregasi langsung di database (sangat cepat & hemat memori)
-        $stats = (clone $baseQuery)->selectRaw("
+        // Stats Dibayar
+        $statsDibayar = (clone $qDibayar)->selectRaw("
             COUNT(*) as total_pengajuan,
             COALESCE(SUM(CASE WHEN status_validasi = 'Disetujui' THEN total_jam_lembur ELSE 0 END), 0) as total_jam_disetujui,
             COALESCE(SUM(CASE WHEN status_validasi = 'Pending' THEN 1 ELSE 0 END), 0) as jml_pending
         ")->first();
 
-        $totalPengajuan    = (int) ($stats->total_pengajuan ?? 0);
-        $totalJamDisetujui = (float) ($stats->total_jam_disetujui ?? 0);
-        $jmlPending        = (int) ($stats->jml_pending ?? 0);
-
         if (!empty($statusFilter)) {
-            $baseQuery->where('status_validasi', $statusFilter);
+            $qDibayar->where('status_validasi', $statusFilter);
         }
 
-        $lemburs = $baseQuery->select([
-                'id', 'user_id', 'jenis_lembur', 'waktu_mulai_lembur', 'waktu_selesai_lembur',
-                'total_jam_lembur', 'status_validasi', 'keterangan', 'latitude_masuk', 'longitude_masuk'
-            ])
-            ->with([
-                'user:id,name,nik,unit_kerja_id',
-                'user.unitKerja:id,nama_unit'
-            ])
+        $rowsDibayar = $qDibayar->with(['user.unitKerja'])
             ->orderByDesc('waktu_mulai_lembur')
-            ->get();
+            ->get()
+            ->map(function ($l) use ($lat, $lng) {
+                $jarak = '-';
+                if (is_numeric($l->latitude_masuk) && is_numeric($l->longitude_masuk)) {
+                    $jarak = round($this->haversine($lat, $lng, (float) $l->latitude_masuk, (float) $l->longitude_masuk)) . ' m';
+                }
 
-        $pengaturan = PengaturanAplikasi::select(['latitude', 'longitude'])->first();
-        $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
-        $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
+                return [
+                    'id'              => $l->id,
+                    'nama'            => $l->user?->name ?? '-',
+                    'nik'             => $l->user?->nik ?? '-',
+                    'unit'            => $l->user?->unitKerja?->nama_unit ?? '-',
+                    'jenis'           => $l->jenis_lembur ?? '-',
+                    'tanggal'         => optional($l->waktu_mulai_lembur)->format('d/m/Y') ?? '-',
+                    'jam_masuk'       => optional($l->waktu_mulai_lembur)->format('H:i') ?? '-',
+                    'jam_keluar'      => optional($l->waktu_selesai_lembur)->format('H:i') ?? '-',
+                    'total_jam_raw'   => (float) $l->total_jam_lembur,
+                    'durasi'          => $l->total_jam_lembur ? number_format($l->total_jam_lembur, 2, ',', '.') . ' jam' : '-',
+                    'jarak'           => $jarak,
+                    'status'          => $l->status_validasi,
+                    'alasan'          => $l->keterangan ?? '-',
+                    'catatan'         => $l->catatan_validasi,
+                    'divalidasi_pada' => optional($l->divalidasi_pada)->format('d/m/Y H:i'),
+                ];
+            });
 
-        $rows = $lemburs->map(function ($l) use ($lat, $lng) {
-            $jarak = '-';
-            if (is_numeric($l->latitude_masuk) && is_numeric($l->longitude_masuk)) {
-                $jarak = round($this->haversine($lat, $lng, (float) $l->latitude_masuk, (float) $l->longitude_masuk)) . ' m';
-            }
+        // ==========================================
+        // 2. DATA TAB 2: BANK JAM PEGAWAI (KOMPENSASI JAM)
+        // ==========================================
+        $qBankJam = User::query()
+            ->whereHas('unitKerja', fn($u) => $u->where('jenis_lembur', 'ganti_jam'));
+
+        if ($allowedUnitIds !== null) {
+            $qBankJam->whereIn('unit_kerja_id', $allowedUnitIds);
+        }
+        if (!empty($unitFilter)) {
+            $qBankJam->where('unit_kerja_id', $unitFilter);
+        }
+
+        $usersBankJam = $qBankJam->with('unitKerja')->orderBy('name', 'asc')->get();
+
+        $rowsBankJam = $usersBankJam->map(function ($u) {
+            $menitDiperoleh = (int) round(
+                LogLembur::where('user_id', $u->id)
+                    ->where('status_validasi', 'Disetujui')
+                    ->sum('total_jam_lembur') * 60
+            );
+
+            $menitDigunakan = (int) PengambilanLembur::where('user_id', $u->id)
+                ->where('status_validasi', 'Disetujui')
+                ->sum('durasi_menit');
+
+            $menitPending = (int) PengambilanLembur::where('user_id', $u->id)
+                ->where('status_validasi', 'Pending')
+                ->sum('durasi_menit');
+
+            $saldoBersihMenit   = max(0, $menitDiperoleh - $menitDigunakan);
+            $saldoTersediaMenit = max(0, $saldoBersihMenit - $menitPending);
+
+            $jDiperoleh = intdiv($menitDiperoleh, 60);
+            $mDiperoleh = $menitDiperoleh % 60;
+            $jDigunakan = intdiv($menitDigunakan, 60);
+            $mDigunakan = $menitDigunakan % 60;
+            $jSaldo = intdiv($saldoTersediaMenit, 60);
+            $mSaldo = $saldoTersediaMenit % 60;
 
             return [
-                'nama'       => $l->user?->name ?? '-',
-                'nik'        => $l->user?->nik ?? '-',
-                'unit'       => $l->user?->unitKerja?->nama_unit ?? '-',
-                'jenis'      => $l->jenis_lembur ?? '-',
-                'tanggal'    => optional($l->waktu_mulai_lembur)->format('d/m/Y') ?? '-',
-                'jam_masuk'  => optional($l->waktu_mulai_lembur)->format('H:i') ?? '-',
-                'jam_keluar' => optional($l->waktu_selesai_lembur)->format('H:i') ?? '-',
-                'durasi'     => $l->total_jam_lembur ? number_format($l->total_jam_lembur, 2, ',', '.') . ' jam' : '-',
-                'jarak'      => $jarak,
-                'status'     => $l->status_validasi,
-                'alasan'     => $l->keterangan ?? '-',
+                'user_id'              => $u->id,
+                'nama'                 => $u->name,
+                'nik'                  => $u->nik ?? '-',
+                'unit'                 => $u->unitKerja?->nama_unit ?? '-',
+                'menit_diperoleh'      => $menitDiperoleh,
+                'menit_digunakan'      => $menitDigunakan,
+                'saldo_menit'          => $saldoTersediaMenit,
+                'jam_diperoleh_teks'   => ($jDiperoleh > 0 ? "{$jDiperoleh}j " : '') . "{$mDiperoleh}m",
+                'jam_digunakan_teks'   => ($jDigunakan > 0 ? "{$jDigunakan}j " : '') . "{$mDigunakan}m",
+                'saldo_tersedia_teks'  => ($jSaldo > 0 ? "{$jSaldo} jam " : '') . "{$mSaldo} mnt",
             ];
         });
+
+        $totalSaldoJamSemua = round($rowsBankJam->sum('saldo_menit') / 60, 1);
+
+        // ==========================================
+        // 3. DATA TAB 3: PENGAMBILAN WAKTU LEMBUR
+        // ==========================================
+        $qPengambilan = PengambilanLembur::query()
+            ->whereBetween('tanggal_dinas', [$start->toDateString(), $end->toDateString()]);
+
+        if ($allowedUnitIds !== null) {
+            $qPengambilan->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+        }
+        if (!empty($unitFilter)) {
+            $qPengambilan->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unitFilter));
+        }
+
+        // Stats Pengambilan
+        $statsPengambilan = (clone $qPengambilan)->selectRaw("
+            COUNT(*) as total_pengajuan,
+            COALESCE(SUM(CASE WHEN status_validasi = 'Disetujui' THEN durasi_menit ELSE 0 END), 0) as total_menit_disetujui,
+            COALESCE(SUM(CASE WHEN status_validasi = 'Pending' THEN 1 ELSE 0 END), 0) as jml_pending
+        ")->first();
+
+        if (!empty($statusFilter)) {
+            $qPengambilan->where('status_validasi', $statusFilter);
+        }
+
+        $rowsPengambilan = $qPengambilan->with(['user.unitKerja', 'validator'])
+            ->orderByDesc('tanggal_dinas')
+            ->get()
+            ->map(function ($p) {
+                $j = intdiv($p->durasi_menit, 60);
+                $m = $p->durasi_menit % 60;
+                $durasiTeks = ($j > 0 ? "{$j} jam " : '') . ($m > 0 ? "{$m} mnt" : '');
+
+                return [
+                    'id'             => $p->id,
+                    'nama'           => $p->user?->name ?? '-',
+                    'nik'            => $p->user?->nik ?? '-',
+                    'unit'           => $p->user?->unitKerja?->nama_unit ?? '-',
+                    'tanggal'        => optional($p->tanggal_dinas)->format('d/m/Y') ?? '-',
+                    'tipe_raw'       => $p->tipe_pengambilan,
+                    'tipe_label'     => $p->tipe_pengambilan === 'masuk_diperlambat' ? 'Masuk Diperlambat' : 'Pulang Dipercepat',
+                    'durasi_menit'   => $p->durasi_menit,
+                    'durasi_teks'    => trim($durasiTeks) ?: "{$p->durasi_menit} mnt",
+                    'status'         => $p->status_validasi,
+                    'keterangan'     => $p->keterangan ?? '-',
+                    'catatan'        => $p->catatan_validasi,
+                    'validator_nama' => $p->validator?->name,
+                    'divalidasi_pada'=> optional($p->divalidasi_pada)->format('d/m/Y H:i'),
+                ];
+            });
 
         $role = $userLogin->role;
 
         return view('laporan.rekap-lembur', compact(
             'role',
-            'totalPengajuan',
-            'totalJamDisetujui',
-            'jmlPending',
             'bulan',
             'tahun',
+            'unitFilter',
             'statusFilter',
-            'rows'
+            'tab',
+            'units',
+            'statsDibayar',
+            'rowsDibayar',
+            'rowsBankJam',
+            'totalSaldoJamSemua',
+            'statsPengambilan',
+            'rowsPengambilan'
         ));
+    }
+
+    public function prosesValidasiLemburWeb(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!in_array($user->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab'])) {
+            abort(403, 'Anda tidak memiliki hak akses untuk memvalidasi lembur.');
+        }
+
+        $request->validate([
+            'status'  => 'required|in:Disetujui,Ditolak',
+            'catatan' => 'nullable|string|max:255',
+        ]);
+
+        $lembur = LogLembur::with('user')->findOrFail($id);
+
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+            $allowed = $this->getAllowedUnitIds($user);
+            if ($allowed !== null && !in_array($lembur->user->unit_kerja_id, $allowed)) {
+                abort(403, 'Pegawai ini bukan anggota unit yang Anda kelola.');
+            }
+        }
+
+        $lembur->update([
+            'status_validasi'  => $request->status,
+            'catatan_validasi' => $request->catatan,
+            'divalidasi_oleh'  => $user->id,
+            'divalidasi_pada'  => now(),
+        ]);
+
+        return redirect()->back()->with('success', "Pengajuan lembur berhasil divalidasi ({$request->status}).");
+    }
+
+    public function prosesValidasiPengambilanWeb(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!in_array($user->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab'])) {
+            abort(403, 'Anda tidak memiliki hak akses untuk memvalidasi pengambilan waktu.');
+        }
+
+        $request->validate([
+            'status'  => 'required|in:Disetujui,Ditolak',
+            'catatan' => 'nullable|string|max:255',
+        ]);
+
+        $pengambilan = PengambilanLembur::with('user')->findOrFail($id);
+
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+            $allowed = $this->getAllowedUnitIds($user);
+            if ($allowed !== null && !in_array($pengambilan->user->unit_kerja_id, $allowed)) {
+                abort(403, 'Pegawai ini bukan anggota unit yang Anda kelola.');
+            }
+        }
+
+        $pengambilan->update([
+            'status_validasi'  => $request->status,
+            'catatan_validasi' => $request->catatan,
+            'divalidasi_oleh'  => $user->id,
+            'divalidasi_pada'  => now(),
+        ]);
+
+        return redirect()->back()->with('success', "Pengajuan pengambilan waktu lembur berhasil divalidasi ({$request->status}).");
+    }
+
+    public function exportLemburExcel(Request $request)
+    {
+        $userLogin      = $request->user();
+        $allowedUnitIds = $this->getAllowedUnitIds($userLogin);
+
+        $bulan        = (int) $request->input('bulan', now()->month);
+        $tahun        = (int) $request->input('tahun', now()->year);
+        $unitFilter   = $request->input('unit_id', '');
+
+        $start = Carbon::createFromDate($tahun, $bulan, 1)->startOfDay();
+        $end   = $start->copy()->endOfMonth()->endOfDay();
+
+        $namaBulan = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+        $periodLabel = ($namaBulan[$bulan] ?? $bulan) . ' ' . $tahun;
+
+        // 1. Data Lembur Dibayar
+        $qDibayar = LogLembur::query()
+            ->whereBetween('waktu_mulai_lembur', [$start, $end])
+            ->whereHas('user.unitKerja', fn($u) => $u->where('jenis_lembur', 'dibayar'));
+
+        if ($allowedUnitIds !== null) {
+            $qDibayar->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+        }
+        if (!empty($unitFilter)) {
+            $qDibayar->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unitFilter));
+        }
+
+        $dataDibayar = $qDibayar->with('user.unitKerja')
+            ->orderByDesc('waktu_mulai_lembur')
+            ->get()
+            ->map(fn($l) => [
+                'nama'          => $l->user?->name ?? '-',
+                'nik'           => $l->user?->nik ?? '-',
+                'unit'          => $l->user?->unitKerja?->nama_unit ?? '-',
+                'jenis'         => $l->jenis_lembur ?? '-',
+                'tanggal'       => optional($l->waktu_mulai_lembur)->format('d/m/Y') ?? '-',
+                'jam_masuk'     => optional($l->waktu_mulai_lembur)->format('H:i') ?? '-',
+                'jam_keluar'    => optional($l->waktu_selesai_lembur)->format('H:i') ?? '-',
+                'total_jam_raw' => (float) $l->total_jam_lembur,
+                'durasi'        => $l->total_jam_lembur ? number_format($l->total_jam_lembur, 2, ',', '.') . ' jam' : '-',
+                'status'        => $l->status_validasi,
+                'alasan'        => $l->keterangan ?? '-',
+            ])->toArray();
+
+        // 2. Data Bank Jam Pegawai
+        $qBankJam = User::query()
+            ->whereHas('unitKerja', fn($u) => $u->where('jenis_lembur', 'ganti_jam'));
+
+        if ($allowedUnitIds !== null) {
+            $qBankJam->whereIn('unit_kerja_id', $allowedUnitIds);
+        }
+        if (!empty($unitFilter)) {
+            $qBankJam->where('unit_kerja_id', $unitFilter);
+        }
+
+        $dataBankJam = $qBankJam->with('unitKerja')->orderBy('name', 'asc')->get()
+            ->map(function ($u) {
+                $menitDiperoleh = (int) round(
+                    LogLembur::where('user_id', $u->id)
+                        ->where('status_validasi', 'Disetujui')
+                        ->sum('total_jam_lembur') * 60
+                );
+                $menitDigunakan = (int) PengambilanLembur::where('user_id', $u->id)
+                    ->where('status_validasi', 'Disetujui')
+                    ->sum('durasi_menit');
+
+                $saldoBersihMenit = max(0, $menitDiperoleh - $menitDigunakan);
+                $jSaldo = intdiv($saldoBersihMenit, 60);
+                $mSaldo = $saldoBersihMenit % 60;
+                $jDiperoleh = intdiv($menitDiperoleh, 60);
+                $mDiperoleh = $menitDiperoleh % 60;
+                $jDigunakan = intdiv($menitDigunakan, 60);
+                $mDigunakan = $menitDigunakan % 60;
+
+                return [
+                    'nama'                => $u->name,
+                    'nik'                 => $u->nik ?? '-',
+                    'unit'                => $u->unitKerja?->nama_unit ?? '-',
+                    'jam_diperoleh_teks'  => ($jDiperoleh > 0 ? "{$jDiperoleh}j " : '') . "{$mDiperoleh}m",
+                    'jam_digunakan_teks'  => ($jDigunakan > 0 ? "{$jDigunakan}j " : '') . "{$mDigunakan}m",
+                    'saldo_tersedia_teks' => ($jSaldo > 0 ? "{$jSaldo} jam " : '') . "{$mSaldo} mnt",
+                    'saldo_menit'         => $saldoBersihMenit,
+                ];
+            })->toArray();
+
+        // 3. Data Pengambilan Jam
+        $qPengambilan = PengambilanLembur::query()
+            ->whereBetween('tanggal_dinas', [$start->toDateString(), $end->toDateString()]);
+
+        if ($allowedUnitIds !== null) {
+            $qPengambilan->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
+        }
+        if (!empty($unitFilter)) {
+            $qPengambilan->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unitFilter));
+        }
+
+        $dataPengambilan = $qPengambilan->with(['user.unitKerja', 'validator'])
+            ->orderByDesc('tanggal_dinas')
+            ->get()
+            ->map(function ($p) {
+                $j = intdiv($p->durasi_menit, 60);
+                $m = $p->durasi_menit % 60;
+                $durasiTeks = ($j > 0 ? "{$j} jam " : '') . ($m > 0 ? "{$m} mnt" : '');
+
+                return [
+                    'nama'           => $p->user?->name ?? '-',
+                    'nik'            => $p->user?->nik ?? '-',
+                    'unit'           => $p->user?->unitKerja?->nama_unit ?? '-',
+                    'tanggal'        => optional($p->tanggal_dinas)->format('d/m/Y') ?? '-',
+                    'tipe_label'     => $p->tipe_pengambilan === 'masuk_diperlambat' ? 'Masuk Diperlambat' : 'Pulang Dipercepat',
+                    'durasi_teks'    => trim($durasiTeks) ?: "{$p->durasi_menit} mnt",
+                    'status'         => $p->status_validasi,
+                    'keterangan'     => $p->keterangan ?? '-',
+                    'validator_nama' => $p->validator?->name ?? '-',
+                ];
+            })->toArray();
+
+        $filename = "Rekap_Lembur_BankJam_{$tahun}_{$bulan}.xlsx";
+
+        return Excel::download(
+            new RekapLemburExport($dataDibayar, $dataBankJam, $dataPengambilan, $periodLabel),
+            $filename
+        );
     }
 
     private function haversine($lat1, $lon1, $lat2, $lon2): float
