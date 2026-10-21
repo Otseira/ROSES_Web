@@ -93,7 +93,7 @@ class RekapLemburDibayarSheet implements FromArray, WithTitle, WithStyles, Shoul
         return $data;
     }
 
-    public function styles(Worksheet $sheet)
+    public function styles(Worksheet $sheet): ?array
     {
         $sheet->mergeCells('A1:K1');
         $sheet->mergeCells('A2:K2');
@@ -177,7 +177,7 @@ class RekapBankJamSheet implements FromArray, WithTitle, WithStyles, ShouldAutoS
         return $data;
     }
 
-    public function styles(Worksheet $sheet)
+    public function styles(Worksheet $sheet): ?array
     {
         $sheet->mergeCells('A1:J1');
         $sheet->mergeCells('A2:J2');
