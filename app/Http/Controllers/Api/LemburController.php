@@ -458,16 +458,21 @@ class LemburController extends Controller
      */
     public function getBankJam(Request $request)
     {
-        $user = $request->user()->load('unitKerja');
+        $user = $request->user()->load(['unitKerja', 'updatedSaldoBy']);
 
-        // Total menit lembur yang telah disetujui (Ekstensi & On-Call)
-        $earnedMinutes = (int) round(
+        $saldoAwalMenit = (int) ($user->saldo_awal_lembur_menit ?? 0);
+
+        // Total menit lembur aplikasi yang telah disetujui (Ekstensi & On-Call) sepanjang masa
+        $menitLemburAplikasi = (int) round(
             LogLembur::where('user_id', $user->id)
                 ->where('status_validasi', 'Disetujui')
                 ->sum('total_jam_lembur') * 60
         );
 
-        // Total menit yang sudah diambil & disetujui
+        // Total akumulasi perolehan = Saldo Awal/Manual + Lembur Disetujui
+        $earnedMinutes = $saldoAwalMenit + $menitLemburAplikasi;
+
+        // Total menit yang sudah diambil & disetujui sepanjang masa
         $usedMinutes = (int) PengambilanLembur::where('user_id', $user->id)
             ->where('status_validasi', 'Disetujui')
             ->sum('durasi_menit');
@@ -491,16 +496,21 @@ class LemburController extends Controller
         return response()->json([
             'success' => true,
             'data'    => [
-                'is_ganti_jam'          => ($user->unitKerja?->jenis_lembur ?? 'dibayar') === 'ganti_jam',
-                'kebijakan_lembur'      => $user->unitKerja?->jenis_lembur ?? 'dibayar',
-                'unit_nama'             => $user->unitKerja?->nama_unit ?? '-',
-                'total_menit_diperoleh' => $earnedMinutes,
-                'total_menit_digunakan' => $usedMinutes,
-                'total_menit_pending'   => $pendingMinutes,
-                'saldo_menit_bersih'    => $saldoBersihMenit,
-                'saldo_menit_tersedia'  => $saldoTersediaMenit,
-                'saldo_bersih_teks'     => trim($teksSaldoBersih) ?: '0 menit',
-                'saldo_tersedia_teks'   => trim($teksSaldoTersedia) ?: '0 menit',
+                'is_ganti_jam'           => ($user->unitKerja?->jenis_lembur ?? 'dibayar') === 'ganti_jam',
+                'kebijakan_lembur'       => $user->unitKerja?->jenis_lembur ?? 'dibayar',
+                'unit_nama'              => $user->unitKerja?->nama_unit ?? '-',
+                'saldo_awal_menit'       => $saldoAwalMenit,
+                'menit_lembur_aplikasi'  => $menitLemburAplikasi,
+                'keterangan_saldo'       => $user->keterangan_saldo_lembur,
+                'updated_saldo_by'       => $user->updatedSaldoBy?->name,
+                'updated_saldo_at'       => optional($user->updated_saldo_lembur_at)->format('d/m/Y H:i'),
+                'total_menit_diperoleh'  => $earnedMinutes,
+                'total_menit_digunakan'  => $usedMinutes,
+                'total_menit_pending'    => $pendingMinutes,
+                'saldo_menit_bersih'     => $saldoBersihMenit,
+                'saldo_menit_tersedia'   => $saldoTersediaMenit,
+                'saldo_bersih_teks'      => trim($teksSaldoBersih) ?: '0 menit',
+                'saldo_tersedia_teks'    => trim($teksSaldoTersedia) ?: '0 menit',
             ],
         ], 200);
     }

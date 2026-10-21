@@ -67,6 +67,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/lembur/excel', [WebLaporanController::class, 'exportLemburExcel'])->name('lembur.excel');
         Route::post('/lembur/validasi/{id}', [WebLaporanController::class, 'prosesValidasiLemburWeb'])->name('lembur.validasi');
         Route::post('/lembur/validasi-pengambilan/{id}', [WebLaporanController::class, 'prosesValidasiPengambilanWeb'])->name('lembur.validasi-pengambilan');
+        Route::post('/lembur/saldo-manual/{userId}', [WebLaporanController::class, 'updateSaldoManual'])->name('lembur.saldo-manual');
     });
 
     // 7. Pengaturan Aplikasi

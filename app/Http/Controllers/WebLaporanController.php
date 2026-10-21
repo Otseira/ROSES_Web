@@ -599,6 +599,8 @@ class WebLaporanController extends Controller
                     $jarak = round($this->haversine($lat, $lng, (float) $l->latitude_masuk, (float) $l->longitude_masuk)) . ' m';
                 }
 
+                $durasiMenit = (int) round(((float) $l->total_jam_lembur) * 60);
+
                 return [
                     'id'              => $l->id,
                     'nama'            => $l->user?->name ?? '-',
@@ -609,7 +611,8 @@ class WebLaporanController extends Controller
                     'jam_masuk'       => optional($l->waktu_mulai_lembur)->format('H:i') ?? '-',
                     'jam_keluar'      => optional($l->waktu_selesai_lembur)->format('H:i') ?? '-',
                     'total_jam_raw'   => (float) $l->total_jam_lembur,
-                    'durasi'          => $l->total_jam_lembur ? number_format($l->total_jam_lembur, 2, ',', '.') . ' jam' : '-',
+                    'durasi_menit'    => $durasiMenit,
+                    'durasi'          => $durasiMenit . ' menit',
                     'jarak'           => $jarak,
                     'status'          => $l->status_validasi,
                     'alasan'          => $l->keterangan ?? '-',
@@ -617,6 +620,8 @@ class WebLaporanController extends Controller
                     'divalidasi_pada' => optional($l->divalidasi_pada)->format('d/m/Y H:i'),
                 ];
             });
+
+        $totalMenitDibayarDisetujui = (int) round(((float) ($statsDibayar->total_jam_disetujui ?? 0)) * 60);
 
         // ==========================================
         // 2. DATA TAB 2: BANK JAM PEGAWAI (KOMPENSASI JAM)
@@ -631,15 +636,20 @@ class WebLaporanController extends Controller
             $qBankJam->where('unit_kerja_id', $unitFilter);
         }
 
-        $usersBankJam = $qBankJam->with('unitKerja')->orderBy('name', 'asc')->get();
+        $usersBankJam = $qBankJam->with(['unitKerja', 'updatedSaldoBy'])->orderBy('name', 'asc')->get();
 
         $rowsBankJam = $usersBankJam->map(function ($u) {
-            $menitDiperoleh = (int) round(
+            $saldoAwalMenit = (int) ($u->saldo_awal_lembur_menit ?? 0);
+            $menitLemburAplikasi = (int) round(
                 LogLembur::where('user_id', $u->id)
                     ->where('status_validasi', 'Disetujui')
                     ->sum('total_jam_lembur') * 60
             );
 
+            // Total perolehan sepanjang masa = Saldo Awal/Manual + Lembur Aplikasi
+            $menitDiperoleh = $saldoAwalMenit + $menitLemburAplikasi;
+
+            // Total yang sudah diambil sepanjang masa
             $menitDigunakan = (int) PengambilanLembur::where('user_id', $u->id)
                 ->where('status_validasi', 'Disetujui')
                 ->sum('durasi_menit');
@@ -651,10 +661,6 @@ class WebLaporanController extends Controller
             $saldoBersihMenit   = max(0, $menitDiperoleh - $menitDigunakan);
             $saldoTersediaMenit = max(0, $saldoBersihMenit - $menitPending);
 
-            $jDiperoleh = intdiv($menitDiperoleh, 60);
-            $mDiperoleh = $menitDiperoleh % 60;
-            $jDigunakan = intdiv($menitDigunakan, 60);
-            $mDigunakan = $menitDigunakan % 60;
             $jSaldo = intdiv($saldoTersediaMenit, 60);
             $mSaldo = $saldoTersediaMenit % 60;
 
@@ -663,16 +669,23 @@ class WebLaporanController extends Controller
                 'nama'                 => $u->name,
                 'nik'                  => $u->nik ?? '-',
                 'unit'                 => $u->unitKerja?->nama_unit ?? '-',
+                'saldo_awal_menit'     => $saldoAwalMenit,
+                'menit_aplikasi'       => $menitLemburAplikasi,
                 'menit_diperoleh'      => $menitDiperoleh,
                 'menit_digunakan'      => $menitDigunakan,
+                'menit_pending'        => $menitPending,
                 'saldo_menit'          => $saldoTersediaMenit,
-                'jam_diperoleh_teks'   => ($jDiperoleh > 0 ? "{$jDiperoleh}j " : '') . "{$mDiperoleh}m",
-                'jam_digunakan_teks'   => ($jDigunakan > 0 ? "{$jDigunakan}j " : '') . "{$mDigunakan}m",
-                'saldo_tersedia_teks'  => ($jSaldo > 0 ? "{$jSaldo} jam " : '') . "{$mSaldo} mnt",
+                'keterangan_saldo'     => $u->keterangan_saldo_lembur,
+                'updated_saldo_by'     => $u->updatedSaldoBy?->name,
+                'updated_saldo_at'     => optional($u->updated_saldo_lembur_at)->format('d/m/Y H:i'),
+                'menit_diperoleh_teks' => $menitDiperoleh . ' menit',
+                'menit_digunakan_teks' => $menitDigunakan . ' menit',
+                'saldo_tersedia_teks'  => $saldoTersediaMenit . ' menit',
+                'saldo_jam_info'       => ($jSaldo > 0 ? "{$jSaldo}j " : '') . "{$mSaldo}m",
             ];
         });
 
-        $totalSaldoJamSemua = round($rowsBankJam->sum('saldo_menit') / 60, 1);
+        $totalSaldoMenitSemua = (int) $rowsBankJam->sum('saldo_menit');
 
         // ==========================================
         // 3. DATA TAB 3: PENGAMBILAN WAKTU LEMBUR
@@ -715,7 +728,7 @@ class WebLaporanController extends Controller
                     'tipe_raw'       => $p->tipe_pengambilan,
                     'tipe_label'     => $p->tipe_pengambilan === 'masuk_diperlambat' ? 'Masuk Diperlambat' : 'Pulang Dipercepat',
                     'durasi_menit'   => $p->durasi_menit,
-                    'durasi_teks'    => trim($durasiTeks) ?: "{$p->durasi_menit} mnt",
+                    'durasi_teks'    => $p->durasi_menit . ' menit',
                     'status'         => $p->status_validasi,
                     'keterangan'     => $p->keterangan ?? '-',
                     'catatan'        => $p->catatan_validasi,
@@ -725,9 +738,11 @@ class WebLaporanController extends Controller
             });
 
         $role = $userLogin->role;
+        $canInputSaldo = in_array($role, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab']);
 
         return view('laporan.rekap-lembur', compact(
             'role',
+            'canInputSaldo',
             'bulan',
             'tahun',
             'unitFilter',
@@ -735,9 +750,10 @@ class WebLaporanController extends Controller
             'tab',
             'units',
             'statsDibayar',
+            'totalMenitDibayarDisetujui',
             'rowsDibayar',
             'rowsBankJam',
-            'totalSaldoJamSemua',
+            'totalSaldoMenitSemua',
             'statsPengambilan',
             'rowsPengambilan'
         ));
@@ -805,6 +821,40 @@ class WebLaporanController extends Controller
         return redirect()->back()->with('success', "Pengajuan pengambilan waktu lembur berhasil divalidasi ({$request->status}).");
     }
 
+    /**
+     * Input / Penyesuaian Saldo Awal Jam Lembur Pegawai oleh Atasan (Ka. Instalasi/PJ/Manajer/HRD/Superadmin).
+     */
+    public function updateSaldoManual(Request $request, $userId)
+    {
+        $userLogin = $request->user();
+        if (!in_array($userLogin->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab'])) {
+            abort(403, 'Anda tidak memiliki hak akses untuk mengubah saldo lembur.');
+        }
+
+        $targetUser = User::with('unitKerja')->findOrFail($userId);
+
+        if (in_array($userLogin->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+            $allowed = $this->getAllowedUnitIds($userLogin);
+            if ($allowed !== null && !in_array($targetUser->unit_kerja_id, $allowed)) {
+                abort(403, 'Pegawai ini bukan anggota unit yang Anda kelola.');
+            }
+        }
+
+        $request->validate([
+            'saldo_awal_menit' => 'required|integer|min:0',
+            'keterangan'       => 'nullable|string|max:255',
+        ]);
+
+        $targetUser->update([
+            'saldo_awal_lembur_menit' => (int) $request->saldo_awal_menit,
+            'keterangan_saldo_lembur' => $request->keterangan,
+            'updated_saldo_lembur_at' => now(),
+            'updated_saldo_lembur_by' => $userLogin->id,
+        ]);
+
+        return redirect()->back()->with('success', "Saldo jam lembur untuk {$targetUser->name} berhasil diperbarui menjadi {$request->saldo_awal_menit} menit.");
+    }
+
     public function exportLemburExcel(Request $request)
     {
         $userLogin      = $request->user();
@@ -835,21 +885,25 @@ class WebLaporanController extends Controller
         $dataDibayar = $qDibayar->with('user.unitKerja')
             ->orderByDesc('waktu_mulai_lembur')
             ->get()
-            ->map(fn($l) => [
-                'nama'          => $l->user?->name ?? '-',
-                'nik'           => $l->user?->nik ?? '-',
-                'unit'          => $l->user?->unitKerja?->nama_unit ?? '-',
-                'jenis'         => $l->jenis_lembur ?? '-',
-                'tanggal'       => optional($l->waktu_mulai_lembur)->format('d/m/Y') ?? '-',
-                'jam_masuk'     => optional($l->waktu_mulai_lembur)->format('H:i') ?? '-',
-                'jam_keluar'    => optional($l->waktu_selesai_lembur)->format('H:i') ?? '-',
-                'total_jam_raw' => (float) $l->total_jam_lembur,
-                'durasi'        => $l->total_jam_lembur ? number_format($l->total_jam_lembur, 2, ',', '.') . ' jam' : '-',
-                'status'        => $l->status_validasi,
-                'alasan'        => $l->keterangan ?? '-',
-            ])->toArray();
+            ->map(function ($l) {
+                $durasiMenit = (int) round(((float) $l->total_jam_lembur) * 60);
+                return [
+                    'nama'          => $l->user?->name ?? '-',
+                    'nik'           => $l->user?->nik ?? '-',
+                    'unit'          => $l->user?->unitKerja?->nama_unit ?? '-',
+                    'jenis'         => $l->jenis_lembur ?? '-',
+                    'tanggal'       => optional($l->waktu_mulai_lembur)->format('d/m/Y') ?? '-',
+                    'jam_masuk'     => optional($l->waktu_mulai_lembur)->format('H:i') ?? '-',
+                    'jam_keluar'    => optional($l->waktu_selesai_lembur)->format('H:i') ?? '-',
+                    'total_jam_raw' => (float) $l->total_jam_lembur,
+                    'durasi_menit'  => $durasiMenit,
+                    'durasi'        => $durasiMenit . ' menit',
+                    'status'        => $l->status_validasi,
+                    'alasan'        => $l->keterangan ?? '-',
+                ];
+            })->toArray();
 
-        // 2. Data Bank Jam Pegawai
+        // 2. Data Bank Jam Pegawai (Sepanjang Masa / All-Time)
         $qBankJam = User::query()
             ->whereHas('unitKerja', fn($u) => $u->where('jenis_lembur', 'ganti_jam'));
 
@@ -862,30 +916,29 @@ class WebLaporanController extends Controller
 
         $dataBankJam = $qBankJam->with('unitKerja')->orderBy('name', 'asc')->get()
             ->map(function ($u) {
-                $menitDiperoleh = (int) round(
+                $saldoAwalMenit = (int) ($u->saldo_awal_lembur_menit ?? 0);
+                $menitLemburAplikasi = (int) round(
                     LogLembur::where('user_id', $u->id)
                         ->where('status_validasi', 'Disetujui')
                         ->sum('total_jam_lembur') * 60
                 );
+                $menitDiperoleh = $saldoAwalMenit + $menitLemburAplikasi;
                 $menitDigunakan = (int) PengambilanLembur::where('user_id', $u->id)
                     ->where('status_validasi', 'Disetujui')
                     ->sum('durasi_menit');
 
                 $saldoBersihMenit = max(0, $menitDiperoleh - $menitDigunakan);
-                $jSaldo = intdiv($saldoBersihMenit, 60);
-                $mSaldo = $saldoBersihMenit % 60;
-                $jDiperoleh = intdiv($menitDiperoleh, 60);
-                $mDiperoleh = $menitDiperoleh % 60;
-                $jDigunakan = intdiv($menitDigunakan, 60);
-                $mDigunakan = $menitDigunakan % 60;
 
                 return [
                     'nama'                => $u->name,
                     'nik'                 => $u->nik ?? '-',
                     'unit'                => $u->unitKerja?->nama_unit ?? '-',
-                    'jam_diperoleh_teks'  => ($jDiperoleh > 0 ? "{$jDiperoleh}j " : '') . "{$mDiperoleh}m",
-                    'jam_digunakan_teks'  => ($jDigunakan > 0 ? "{$jDigunakan}j " : '') . "{$mDigunakan}m",
-                    'saldo_tersedia_teks' => ($jSaldo > 0 ? "{$jSaldo} jam " : '') . "{$mSaldo} mnt",
+                    'saldo_awal_menit'    => $saldoAwalMenit,
+                    'menit_diperoleh'     => $menitDiperoleh,
+                    'menit_digunakan'     => $menitDigunakan,
+                    'jam_diperoleh_teks'  => $menitDiperoleh . ' menit',
+                    'jam_digunakan_teks'  => $menitDigunakan . ' menit',
+                    'saldo_tersedia_teks' => $saldoBersihMenit . ' menit',
                     'saldo_menit'         => $saldoBersihMenit,
                 ];
             })->toArray();
@@ -905,17 +958,14 @@ class WebLaporanController extends Controller
             ->orderByDesc('tanggal_dinas')
             ->get()
             ->map(function ($p) {
-                $j = intdiv($p->durasi_menit, 60);
-                $m = $p->durasi_menit % 60;
-                $durasiTeks = ($j > 0 ? "{$j} jam " : '') . ($m > 0 ? "{$m} mnt" : '');
-
                 return [
                     'nama'           => $p->user?->name ?? '-',
                     'nik'            => $p->user?->nik ?? '-',
                     'unit'           => $p->user?->unitKerja?->nama_unit ?? '-',
                     'tanggal'        => optional($p->tanggal_dinas)->format('d/m/Y') ?? '-',
                     'tipe_label'     => $p->tipe_pengambilan === 'masuk_diperlambat' ? 'Masuk Diperlambat' : 'Pulang Dipercepat',
-                    'durasi_teks'    => trim($durasiTeks) ?: "{$p->durasi_menit} mnt",
+                    'durasi_menit'   => $p->durasi_menit,
+                    'durasi_teks'    => $p->durasi_menit . ' menit',
                     'status'         => $p->status_validasi,
                     'keterangan'     => $p->keterangan ?? '-',
                     'validator_nama' => $p->validator?->name ?? '-',

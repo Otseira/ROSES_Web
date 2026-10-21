@@ -61,15 +61,15 @@ class RekapLemburDibayarSheet implements FromArray, WithTitle, WithStyles, Shoul
             ['REKAPITULASI LEMBUR BERBAYAR (PAYROLL)'],
             ['Periode: ' . $this->periodLabel],
             [''],
-            ['No', 'Nama Pegawai', 'NIK', 'Unit Kerja', 'Jenis', 'Tanggal', 'Jam Mulai', 'Jam Selesai', 'Total Jam', 'Status', 'Keterangan'],
+            ['No', 'Nama Pegawai', 'NIK', 'Unit Kerja', 'Jenis', 'Tanggal', 'Jam Mulai', 'Jam Selesai', 'Durasi (Menit)', 'Status', 'Keterangan'],
         ];
 
         $no = 1;
-        $totalJam = 0;
+        $totalMenit = 0;
         foreach ($this->rows as $r) {
-            $jam = (float) ($r['total_jam_raw'] ?? 0);
+            $menit = (int) ($r['durasi_menit'] ?? round(((float) ($r['total_jam_raw'] ?? 0)) * 60));
             if (($r['status'] ?? '') === 'Disetujui') {
-                $totalJam += $jam;
+                $totalMenit += $menit;
             }
 
             $data[] = [
@@ -81,14 +81,14 @@ class RekapLemburDibayarSheet implements FromArray, WithTitle, WithStyles, Shoul
                 $r['tanggal'] ?? '-',
                 $r['jam_masuk'] ?? '-',
                 $r['jam_keluar'] ?? '-',
-                $r['durasi'] ?? '-',
+                $r['durasi'] ?? "{$menit} menit",
                 $r['status'] ?? '-',
                 $r['alasan'] ?? '-',
             ];
         }
 
         $data[] = [''];
-        $data[] = ['', '', '', '', '', '', '', 'Total Jam Disetujui:', number_format($totalJam, 2, ',', '.') . ' Jam', '', ''];
+        $data[] = ['', '', '', '', '', '', '', 'Total Lembur Disetujui:', number_format($totalMenit, 0, ',', '.') . ' Menit', '', ''];
 
         return $data;
     }
@@ -137,7 +137,7 @@ class RekapBankJamSheet implements FromArray, WithTitle, WithStyles, ShouldAutoS
             ['Periode: ' . $this->periodLabel],
             [''],
             ['BAGIAN 1: SALDO BANK JAM PEGAWAI (UNIT KOMPENSASI)'],
-            ['No', 'Nama Pegawai', 'NIK', 'Unit Kerja', 'Total Jam Lembur (+)', 'Total Jam Digunakan (-)', 'Saldo Jam Tersedia', 'Status Saldo'],
+            ['No', 'Nama Pegawai', 'NIK', 'Unit Kerja', 'Total Diperoleh (Menit) (+)', 'Total Digunakan (Menit) (-)', 'Saldo Tersedia (Menit)', 'Status Saldo'],
         ];
 
         $no = 1;
@@ -156,7 +156,7 @@ class RekapBankJamSheet implements FromArray, WithTitle, WithStyles, ShouldAutoS
 
         $data[] = [''];
         $data[] = ['BAGIAN 2: RIWAYAT PENGAMBILAN JAM (MASUK LAMBAT / PULANG CEPAT)'];
-        $data[] = ['No', 'Nama Pegawai', 'NIK', 'Unit Kerja', 'Tanggal Dinas', 'Jenis Pengambilan', 'Durasi Diambil', 'Status', 'Alasan', 'Divalidasi Oleh'];
+        $data[] = ['No', 'Nama Pegawai', 'NIK', 'Unit Kerja', 'Tanggal Dinas', 'Jenis Pengambilan', 'Durasi Diambil (Menit)', 'Status', 'Alasan', 'Divalidasi Oleh'];
 
         $noPengambilan = 1;
         foreach ($this->dataPengambilan as $p) {

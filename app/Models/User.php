@@ -34,6 +34,10 @@ class User extends Authenticatable
         'password',
         'is_active',
         'foto_profil', // <-- TAMBAHKAN INI
+        'saldo_awal_lembur_menit',
+        'keterangan_saldo_lembur',
+        'updated_saldo_lembur_at',
+        'updated_saldo_lembur_by',
     ];
 
     /**
@@ -89,6 +93,11 @@ class User extends Authenticatable
     public function pengambilanLemburs(): HasMany
     {
         return $this->hasMany(PengambilanLembur::class, 'user_id');
+    }
+
+    public function updatedSaldoBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'updated_saldo_lembur_by');
     }
 
     // ===== RELASI BARU: Unit yang Dikelola (Multi-Unit) =====
