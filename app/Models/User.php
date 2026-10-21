@@ -119,7 +119,7 @@ class User extends Authenticatable
      */
     public function isManajemen(): bool
     {
-        return in_array($this->role, ['kepala_unit', 'penanggung_jawab', 'manajer']);
+        return in_array($this->role, ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager']);
     }
 
     /**

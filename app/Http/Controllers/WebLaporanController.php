@@ -738,7 +738,7 @@ class WebLaporanController extends Controller
             });
 
         $role = $userLogin->role;
-        $canInputSaldo = in_array($role, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab']);
+        $canInputSaldo = in_array($role, ['superadmin', 'hrd', 'direktur', 'manajer', 'manager', 'kepala_unit', 'penanggung_jawab']);
 
         return view('laporan.rekap-lembur', compact(
             'role',
@@ -762,7 +762,7 @@ class WebLaporanController extends Controller
     public function prosesValidasiLemburWeb(Request $request, $id)
     {
         $user = $request->user();
-        if (!in_array($user->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab'])) {
+        if (!in_array($user->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'manager', 'kepala_unit', 'penanggung_jawab'])) {
             abort(403, 'Anda tidak memiliki hak akses untuk memvalidasi lembur.');
         }
 
@@ -773,7 +773,7 @@ class WebLaporanController extends Controller
 
         $lembur = LogLembur::with('user')->findOrFail($id);
 
-        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager'])) {
             $allowed = $this->getAllowedUnitIds($user);
             if ($allowed !== null && !in_array($lembur->user->unit_kerja_id, $allowed)) {
                 abort(403, 'Pegawai ini bukan anggota unit yang Anda kelola.');
@@ -793,7 +793,7 @@ class WebLaporanController extends Controller
     public function prosesValidasiPengambilanWeb(Request $request, $id)
     {
         $user = $request->user();
-        if (!in_array($user->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab'])) {
+        if (!in_array($user->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'manager', 'kepala_unit', 'penanggung_jawab'])) {
             abort(403, 'Anda tidak memiliki hak akses untuk memvalidasi pengambilan waktu.');
         }
 
@@ -804,7 +804,7 @@ class WebLaporanController extends Controller
 
         $pengambilan = PengambilanLembur::with('user')->findOrFail($id);
 
-        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager'])) {
             $allowed = $this->getAllowedUnitIds($user);
             if ($allowed !== null && !in_array($pengambilan->user->unit_kerja_id, $allowed)) {
                 abort(403, 'Pegawai ini bukan anggota unit yang Anda kelola.');
@@ -827,13 +827,13 @@ class WebLaporanController extends Controller
     public function updateSaldoManual(Request $request, $userId)
     {
         $userLogin = $request->user();
-        if (!in_array($userLogin->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab'])) {
+        if (!in_array($userLogin->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'manager', 'kepala_unit', 'penanggung_jawab'])) {
             abort(403, 'Anda tidak memiliki hak akses untuk mengubah saldo lembur.');
         }
 
         $targetUser = User::with('unitKerja')->findOrFail($userId);
 
-        if (in_array($userLogin->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+        if (in_array($userLogin->role, ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager'])) {
             $allowed = $this->getAllowedUnitIds($userLogin);
             if ($allowed !== null && !in_array($targetUser->unit_kerja_id, $allowed)) {
                 abort(403, 'Pegawai ini bukan anggota unit yang Anda kelola.');

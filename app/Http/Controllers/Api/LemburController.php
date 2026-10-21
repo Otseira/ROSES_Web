@@ -360,7 +360,7 @@ class LemburController extends Controller
     public function listValidasi(Request $request)
     {
         $user = $request->user();
-        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'hrd', 'superadmin', 'direktur'];
+        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager', 'hrd', 'superadmin', 'direktur'];
         if (!in_array($user->role, $roleAllowed)) {
             return response()->json(['success' => false, 'message' => 'Tidak memiliki hak akses.'], 403);
         }
@@ -375,12 +375,19 @@ class LemburController extends Controller
             $query->where('jenis_lembur', $request->jenis_lembur);
         }
 
-        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager'])) {
             $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
+            if ($user->unit_kerja_id && !$unitIds->contains($user->unit_kerja_id)) {
+                $unitIds->push($user->unit_kerja_id);
+            }
             if ($unitIds->isEmpty()) {
                 $unitIds = collect([$user->unit_kerja_id]);
             }
             $query->whereHas('user', fn($q) => $q->whereIn('unit_kerja_id', $unitIds));
+        }
+
+        if ($request->filled('unit_id') && $request->unit_id !== 'all' && $request->unit_id !== '') {
+            $query->whereHas('user', fn($q) => $q->where('unit_kerja_id', $request->unit_id));
         }
 
         return response()->json([
@@ -393,7 +400,7 @@ class LemburController extends Controller
     public function prosesValidasi(Request $request, $id)
     {
         $user = $request->user();
-        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'hrd', 'superadmin', 'direktur'];
+        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager', 'hrd', 'superadmin', 'direktur'];
         if (!in_array($user->role, $roleAllowed)) {
             return response()->json(['success' => false, 'message' => 'Tidak memiliki hak akses.'], 403);
         }
@@ -422,8 +429,11 @@ class LemburController extends Controller
 
         $lembur = LogLembur::with('user')->findOrFail($id);
 
-        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager'])) {
             $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
+            if ($user->unit_kerja_id && !$unitIds->contains($user->unit_kerja_id)) {
+                $unitIds->push($user->unit_kerja_id);
+            }
             if ($unitIds->isEmpty()) {
                 $unitIds = collect([$user->unit_kerja_id]);
             }
@@ -618,7 +628,7 @@ class LemburController extends Controller
     public function listValidasiPengambilanJam(Request $request)
     {
         $user = $request->user();
-        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'hrd', 'superadmin', 'direktur'];
+        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager', 'hrd', 'superadmin', 'direktur'];
         if (!in_array($user->role, $roleAllowed)) {
             return response()->json(['success' => false, 'message' => 'Tidak memiliki hak akses.'], 403);
         }
@@ -629,12 +639,19 @@ class LemburController extends Controller
             $query->where('status_validasi', $request->status);
         }
 
-        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager'])) {
             $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
+            if ($user->unit_kerja_id && !$unitIds->contains($user->unit_kerja_id)) {
+                $unitIds->push($user->unit_kerja_id);
+            }
             if ($unitIds->isEmpty()) {
                 $unitIds = collect([$user->unit_kerja_id]);
             }
             $query->whereHas('user', fn($q) => $q->whereIn('unit_kerja_id', $unitIds));
+        }
+
+        if ($request->filled('unit_id') && $request->unit_id !== 'all' && $request->unit_id !== '') {
+            $query->whereHas('user', fn($q) => $q->where('unit_kerja_id', $request->unit_id));
         }
 
         return response()->json([
@@ -649,7 +666,7 @@ class LemburController extends Controller
     public function prosesValidasiPengambilanJam(Request $request, $id)
     {
         $user = $request->user();
-        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'hrd', 'superadmin', 'direktur'];
+        $roleAllowed = ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager', 'hrd', 'superadmin', 'direktur'];
         if (!in_array($user->role, $roleAllowed)) {
             return response()->json(['success' => false, 'message' => 'Tidak memiliki hak akses.'], 403);
         }
@@ -678,8 +695,11 @@ class LemburController extends Controller
 
         $pengambilan = PengambilanLembur::with('user')->findOrFail($id);
 
-        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer'])) {
+        if (in_array($user->role, ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager'])) {
             $unitIds = $user->managesUnits()->pluck('master_unit_kerjas.id');
+            if ($user->unit_kerja_id && !$unitIds->contains($user->unit_kerja_id)) {
+                $unitIds->push($user->unit_kerja_id);
+            }
             if ($unitIds->isEmpty()) {
                 $unitIds = collect([$user->unit_kerja_id]);
             }

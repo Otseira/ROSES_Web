@@ -103,7 +103,7 @@ class WebPegawaiController extends Controller
             'username'       => 'required|string|max:50|alpha_dash|unique:users,username',
             'name'           => 'required|string|max:255',
             'unit_kerja_id'  => 'required|exists:master_unit_kerjas,id',
-            'role'           => 'required|string|in:staf,kepala_unit,penanggung_jawab,manajer,direktur,hrd,superadmin',
+            'role'           => 'required|string|in:staf,kepala_unit,penanggung_jawab,manajer,manager,direktur,hrd,superadmin',
             'password'       => 'required|string|min:6',
 
             'manages_units'   => 'nullable|array',
@@ -123,7 +123,7 @@ class WebPegawaiController extends Controller
                 'is_active'      => true,
             ]);
 
-            $rolesManajemen = ['kepala_unit', 'penanggung_jawab', 'manajer'];
+            $rolesManajemen = ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager'];
             if (in_array($request->role, $rolesManajemen) && $request->has('manages_units')) {
                 $user->managesUnits()->sync($request->manages_units);
             }
@@ -174,7 +174,7 @@ class WebPegawaiController extends Controller
             'username'       => 'required|string|max:50|alpha_dash|unique:users,username,' . $master_pegawai->id,
             'name'           => 'required|string|max:255',
             'unit_kerja_id'  => 'required|exists:master_unit_kerjas,id',
-            'role'           => 'required|string|in:staf,kepala_unit,penanggung_jawab,manajer,direktur,hrd,superadmin',
+            'role'           => 'required|string|in:staf,kepala_unit,penanggung_jawab,manajer,manager,direktur,hrd,superadmin',
             'password'       => 'nullable|string|min:6',
 
             'manages_units'   => 'nullable|array',
@@ -196,7 +196,7 @@ class WebPegawaiController extends Controller
                 $master_pegawai->update(['password' => Hash::make($request->password)]);
             }
 
-            $rolesManajemen = ['kepala_unit', 'penanggung_jawab', 'manajer'];
+            $rolesManajemen = ['kepala_unit', 'penanggung_jawab', 'manajer', 'manager'];
             if (in_array($request->role, $rolesManajemen)) {
                 $master_pegawai->managesUnits()->sync($request->manages_units ?? []);
             } else {

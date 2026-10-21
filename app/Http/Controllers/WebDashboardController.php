@@ -153,7 +153,7 @@ class WebDashboardController extends Controller
 
     private function kkCanSee($user)
     {
-        return in_array($user->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit', 'penanggung_jawab']);
+        return in_array($user->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'manager', 'kepala_unit', 'penanggung_jawab']);
     }
 
     private function kkIsGlobal($user)
