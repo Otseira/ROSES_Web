@@ -423,7 +423,8 @@ class WebLaporanController extends Controller
         $logs = LogAbsensi::select([
                 'id', 'user_id', 'roster_id', 'tanggal_dinas', 'waktu_masuk', 'waktu_pulang',
                 'menit_terlambat', 'status_kehadiran', 'jenis_absen',
-                'latitude_masuk', 'longitude_masuk', 'latitude_pulang', 'longitude_pulang'
+                'latitude_masuk', 'longitude_masuk', 'latitude_pulang', 'longitude_pulang',
+                'foto_masuk', 'foto_pulang', 'durasi_kerja'
             ])
             ->with([
                 'user:id,name,nik,unit_kerja_id',

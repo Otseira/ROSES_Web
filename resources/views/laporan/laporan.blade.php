@@ -231,22 +231,42 @@
                         <td class="px-5 py-4 text-sm font-semibold text-slate-600 whitespace-nowrap">{{ $log->jarak !==
                             null ? $log->jarak . ' m' : '-' }}</td>
                         <td class="px-5 py-4">
-                            <div class="flex gap-1.5">
-                                @if($log->foto_masuk)
-                                <a href="{{ url('/storage/' . $log->foto_masuk) }}" target="_blank" title="Foto Masuk">
-                                    <img src="{{ url('/storage/' . $log->foto_masuk) }}"
-                                        class="w-9 h-9 rounded-md object-cover border border-emerald-200">
-                                </a>
+                            @php
+                                $urlMasuk = null;
+                                if ($log->foto_masuk) {
+                                    $urlMasuk = str_starts_with($log->foto_masuk, 'http')
+                                        ? $log->foto_masuk
+                                        : asset(str_starts_with($log->foto_masuk, 'storage/') ? $log->foto_masuk : 'storage/' . ltrim($log->foto_masuk, '/'));
+                                }
+                                $urlPulang = null;
+                                if ($log->foto_pulang) {
+                                    $urlPulang = str_starts_with($log->foto_pulang, 'http')
+                                        ? $log->foto_pulang
+                                        : asset(str_starts_with($log->foto_pulang, 'storage/') ? $log->foto_pulang : 'storage/' . ltrim($log->foto_pulang, '/'));
+                                }
+                            @endphp
+                            <div class="flex items-center gap-2">
+                                @if($urlMasuk)
+                                <div class="relative group cursor-pointer" onclick="openPhotoModal('{{ $urlMasuk }}', 'Foto Masuk - {{ addslashes($nama) }} ({{ $log->waktu_masuk ? \Carbon\Carbon::parse($log->waktu_masuk)->format('H:i') : '' }})')">
+                                    <img src="{{ $urlMasuk }}"
+                                        alt="Masuk"
+                                        class="w-9 h-9 rounded-lg object-cover border-2 border-emerald-400 shadow-xs hover:scale-110 transition-transform"
+                                        onerror="this.onerror=null; this.parentElement.style.display='none';">
+                                    <span class="absolute -bottom-1 -right-1 bg-emerald-600 text-white text-[8px] font-black px-1 rounded shadow">IN</span>
+                                </div>
                                 @endif
-                                @if($log->foto_pulang)
-                                <a href="{{ url('/storage/' . $log->foto_pulang) }}" target="_blank"
-                                    title="Foto Keluar">
-                                    <img src="{{ url('/storage/' . $log->foto_pulang) }}"
-                                        class="w-9 h-9 rounded-md object-cover border border-orange-200">
-                                </a>
+                                @if($urlPulang)
+                                <div class="relative group cursor-pointer" onclick="openPhotoModal('{{ $urlPulang }}', 'Foto Pulang - {{ addslashes($nama) }} ({{ $log->waktu_pulang ? \Carbon\Carbon::parse($log->waktu_pulang)->format('H:i') : '' }})')">
+                                    <img src="{{ $urlPulang }}"
+                                        alt="Pulang"
+                                        class="w-9 h-9 rounded-lg object-cover border-2 border-orange-400 shadow-xs hover:scale-110 transition-transform"
+                                        onerror="this.onerror=null; this.parentElement.style.display='none';">
+                                    <span class="absolute -bottom-1 -right-1 bg-orange-600 text-white text-[8px] font-black px-1 rounded shadow">OUT</span>
+                                </div>
                                 @endif
-                                @if(!$log->foto_masuk && !$log->foto_pulang) <span
-                                    class="text-slate-400 text-sm">—</span> @endif
+                                @if(!$urlMasuk && !$urlPulang)
+                                <span class="text-slate-400 text-sm font-semibold">—</span>
+                                @endif
                             </div>
                         </td>
                         <td
@@ -276,7 +296,36 @@
     </div>
 </div>
 
+{{-- MODAL PREVIEW FOTO ABSENSI --}}
+<div id="photoPreviewModal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4" onclick="closePhotoModal()">
+    <div class="relative max-w-lg w-full bg-white rounded-2xl overflow-hidden shadow-2xl p-5 text-center transition-all transform" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+            <h4 id="photoModalTitle" class="text-sm font-black text-slate-800">Preview Foto Absensi</h4>
+            <button type="button" onclick="closePhotoModal()" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 font-bold flex items-center justify-center transition-colors">&times;</button>
+        </div>
+        <img id="photoModalImage" src="" alt="Preview" class="w-full max-h-[70vh] object-contain rounded-xl mx-auto border border-slate-100 shadow-inner bg-slate-50">
+        <div class="mt-4 flex justify-end">
+            <a id="photoModalDownload" href="" target="_blank" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all">Buka Tab Baru &nearr;</a>
+        </div>
+    </div>
+</div>
+
 <script>
     if (typeof lucide !== 'undefined') lucide.createIcons();
+
+    function openPhotoModal(url, title) {
+        document.getElementById('photoModalImage').src = url;
+        document.getElementById('photoModalTitle').innerText = title || 'Preview Foto Absensi';
+        document.getElementById('photoModalDownload').href = url;
+        document.getElementById('photoPreviewModal').classList.remove('hidden');
+    }
+
+    function closePhotoModal() {
+        document.getElementById('photoPreviewModal').classList.add('hidden');
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closePhotoModal();
+    });
 </script>
 @endsection
