@@ -21,8 +21,37 @@ class AbsensiController extends Controller
         $request->validate([
             'latitude'  => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
-            'foto'      => 'nullable|image|mimes:jpeg,png,jpg,webp|max:3072',
+            'foto'      => 'required|image|mimes:jpeg,png,jpg,webp|max:3072',
+            'accuracy'  => 'nullable|numeric|between:0.1,200',
+            'is_mock'   => 'nullable|string',
         ]);
+
+        // Cek indikasi manipulasi lokasi palsu (Fake GPS / Mock)
+        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Absensi ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
+            ], 403);
+        }
+
+        // Koordinat nol (invalid GPS)
+        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Absensi ditolak: koordinat GPS tidak valid (0,0). Pastikan GPS HP Anda aktif.',
+            ], 422);
+        }
+
+        // Cek akurasi sinyal satelit GPS
+        if ($request->filled('accuracy')) {
+            $acc = (float) $request->accuracy;
+            if ($acc > 80.0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Akurasi GPS rendah (' . round($acc) . 'm). Silakan pindah ke dekat jendela atau area terbuka agar posisi akurat.',
+                ], 422);
+            }
+        }
 
         $user  = $request->user();
         $now   = Carbon::now();
@@ -151,6 +180,7 @@ class AbsensiController extends Controller
             'latitude_masuk'   => $request->latitude,
             'longitude_masuk'  => $request->longitude,
             'foto_masuk'       => $fotoPath,
+            'ip_address_masuk' => $request->ip(),
             'jenis_absen'      => 'dalam_radius',
             'menit_terlambat'  => 0,
             'status_kehadiran' => 'Tanpa Jadwal',
@@ -183,8 +213,37 @@ class AbsensiController extends Controller
         $request->validate([
             'latitude'  => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
-            'foto'      => 'nullable|image|mimes:jpeg,png,jpg,webp|max:3072',
+            'foto'      => 'required|image|mimes:jpeg,png,jpg,webp|max:3072',
+            'accuracy'  => 'nullable|numeric|between:0.1,200',
+            'is_mock'   => 'nullable|string',
         ]);
+
+        // Cek indikasi manipulasi lokasi palsu (Fake GPS / Mock)
+        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Absen pulang ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
+            ], 403);
+        }
+
+        // Koordinat nol (invalid GPS)
+        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Absen pulang ditolak: koordinat GPS tidak valid (0,0). Pastikan GPS HP Anda aktif.',
+            ], 422);
+        }
+
+        // Cek akurasi sinyal satelit GPS
+        if ($request->filled('accuracy')) {
+            $acc = (float) $request->accuracy;
+            if ($acc > 80.0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Akurasi GPS rendah (' . round($acc) . 'm). Silakan pindah ke dekat jendela atau area terbuka agar posisi akurat.',
+                ], 422);
+            }
+        }
 
         $user = $request->user();
         $now  = Carbon::now();
@@ -210,10 +269,11 @@ class AbsensiController extends Controller
             : null;
 
         $logAktif->update([
-            'waktu_pulang'     => $now,
-            'latitude_pulang'  => $request->latitude,
-            'longitude_pulang' => $request->longitude,
-            'foto_pulang'      => $fotoPath,
+            'waktu_pulang'      => $now,
+            'latitude_pulang'   => $request->latitude,
+            'longitude_pulang'  => $request->longitude,
+            'foto_pulang'       => $fotoPath,
+            'ip_address_pulang' => $request->ip(),
         ]);
 
         self::recalculateStatus($logAktif);

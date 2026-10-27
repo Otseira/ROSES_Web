@@ -24,8 +24,32 @@ class LemburController extends Controller
             'latitude'     => 'required|numeric|between:-90,90',
             'longitude'    => 'required|numeric|between:-180,180',
             'foto_masuk'   => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
-            'durasi_menit' => 'nullable|integer|min:1|max:720',
+            'durasi_menit' => 'nullable|integer|min:30|max:720',
+            'accuracy'     => 'nullable|numeric|between:0.1,200',
+            'is_mock'      => 'nullable|string',
         ]);
+
+        // Cek manipulasi Fake GPS
+        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Lembur ekstensi ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
+            ], 403);
+        }
+
+        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Lembur ekstensi ditolak: koordinat GPS tidak valid (0,0).',
+            ], 422);
+        }
+
+        if ($request->filled('accuracy') && (float) $request->accuracy > 80.0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akurasi GPS rendah (' . round((float) $request->accuracy) . 'm). Silakan pindah ke area terbuka agar posisi akurat.',
+            ], 422);
+        }
 
         $user  = $request->user()->load('unitKerja');
         $now   = Carbon::now();
@@ -80,12 +104,20 @@ class LemburController extends Controller
             ], 422);
         }
 
-        // Range terkunci: 1 s/d (sekarang − akhir sesi referensi)
+        // Range terkunci: 30 s/d (sekarang − akhir sesi referensi)
         $maxMenit    = intdiv($now->getTimestamp() - $winEnd->getTimestamp(), 60);
+
+        if ($maxMenit < 30) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Lembur ekstensi baru dapat diajukan minimal 30 menit setelah jam pulang jadwal (' . $winEnd->format('H:i') . ').',
+            ], 422);
+        }
+
         $durasiMenit = $request->filled('durasi_menit') ? (int) $request->durasi_menit : $maxMenit;
 
-        if ($durasiMenit < 1) {
-            return response()->json(['success' => false, 'message' => 'Durasi minimal 1 menit.'], 422);
+        if ($durasiMenit < 30) {
+            return response()->json(['success' => false, 'message' => 'Durasi lembur minimal 30 menit.'], 422);
         }
         if ($durasiMenit > $maxMenit) {
             return response()->json([
@@ -148,7 +180,30 @@ class LemburController extends Controller
             'latitude'   => 'required|numeric|between:-90,90',
             'longitude'  => 'required|numeric|between:-180,180',
             'foto_masuk' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
+            'accuracy'   => 'nullable|numeric|between:0.1,200',
+            'is_mock'    => 'nullable|string',
         ]);
+
+        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
+            return response()->json([
+                'success' => false,
+                'message' => 'On-Call masuk ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
+            ], 403);
+        }
+
+        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'On-Call masuk ditolak: koordinat GPS tidak valid (0,0).',
+            ], 422);
+        }
+
+        if ($request->filled('accuracy') && (float) $request->accuracy > 80.0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akurasi GPS rendah (' . round((float) $request->accuracy) . 'm). Silakan pindah ke area terbuka agar posisi akurat.',
+            ], 422);
+        }
 
         $user = $request->user()->load('unitKerja');
         $now  = Carbon::now();
@@ -216,7 +271,30 @@ class LemburController extends Controller
             'latitude'    => 'required|numeric|between:-90,90',
             'longitude'   => 'required|numeric|between:-180,180',
             'foto_keluar' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
+            'accuracy'    => 'nullable|numeric|between:0.1,200',
+            'is_mock'     => 'nullable|string',
         ]);
+
+        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
+            return response()->json([
+                'success' => false,
+                'message' => 'On-Call keluar ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
+            ], 403);
+        }
+
+        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'On-Call keluar ditolak: koordinat GPS tidak valid (0,0).',
+            ], 422);
+        }
+
+        if ($request->filled('accuracy') && (float) $request->accuracy > 80.0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akurasi GPS rendah (' . round((float) $request->accuracy) . 'm). Silakan pindah ke area terbuka agar posisi akurat.',
+            ], 422);
+        }
 
         $user = $request->user()->load('unitKerja');
         $now  = Carbon::now();
@@ -326,11 +404,13 @@ class LemburController extends Controller
         return response()->json([
             'success' => true,
             'data'    => [
-                'jam_masuk'  => $jamMasuk ? substr((string) $jamMasuk, 0, 5) : null,
-                'jam_pulang' => $winEnd->format('H:i'),   // ✅ jam pulang SESI yang benar (mis. 07:40)
-                'max_menit'  => max(0, $maxMenit),
-                'sesi'       => $roster->sesi,
-                'tanggal'    => Carbon::parse($roster->tanggal_dinas)->format('Y-m-d'),
+                'jam_masuk'     => $jamMasuk ? substr((string) $jamMasuk, 0, 5) : null,
+                'jam_pulang'    => $winEnd->format('H:i'),   // ✅ jam pulang SESI yang benar (mis. 07:40)
+                'max_menit'     => max(0, $maxMenit),
+                'min_menit'     => 30,
+                'bisa_ekstensi' => ($maxMenit >= 30),
+                'sesi'          => $roster->sesi,
+                'tanggal'       => Carbon::parse($roster->tanggal_dinas)->format('Y-m-d'),
             ],
         ], 200);
     }
@@ -348,6 +428,13 @@ class LemburController extends Controller
 
         if ($request->filled('status') && $request->status !== 'Semua') {
             $query->where('status_validasi', $request->status);
+        }
+
+        if ($request->filled('start_date') && $request->filled('end_date')) {
+            $query->whereBetween('waktu_mulai_lembur', [
+                Carbon::parse($request->start_date)->startOfDay(),
+                Carbon::parse($request->end_date)->endOfDay(),
+            ]);
         }
 
         return response()->json([
@@ -616,6 +703,13 @@ class LemburController extends Controller
             $query->where('status_validasi', $request->status);
         }
 
+        if ($request->filled('start_date') && $request->filled('end_date')) {
+            $query->whereBetween('tanggal_dinas', [
+                Carbon::parse($request->start_date)->format('Y-m-d'),
+                Carbon::parse($request->end_date)->format('Y-m-d'),
+            ]);
+        }
+
         return response()->json([
             'success' => true,
             'data'    => $query->get()->map(fn($p) => $this->normalizePengambilanJam($p)),
@@ -811,9 +905,11 @@ class LemburController extends Controller
             'jam_selesai'   => $selesai?->format('H:i'),
             'tanggal'       => $mulai?->format('d/m/Y'),
 
-            'total_jam'  => $l->total_jam_lembur,
-            'durasi_jam' => $l->total_jam_lembur,
-            'status'     => $l->status_validasi,
+            'total_jam'     => $l->total_jam_lembur,
+            'durasi_jam'    => $l->total_jam_lembur,
+            'durasi_menit'  => (int) round(((float) $l->total_jam_lembur) * 60),
+            'total_menit'   => (int) round(((float) $l->total_jam_lembur) * 60),
+            'status'        => $l->status_validasi,
 
             'foto'            => $l->foto_masuk ? url('storage/' . $l->foto_masuk) : null,
             'foto_masuk_url'  => $l->foto_masuk ? url('storage/' . $l->foto_masuk) : null,
