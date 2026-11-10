@@ -162,8 +162,9 @@
     </div>
 
     <!-- Footer (Safe Area Bottom Aware) -->
-    <div class="text-center pt-2 pb-safe relative z-10 border-t border-slate-100">
-        <p class="text-[10px] text-slate-400">&copy; {{ date('Y') }} {{ $namaInstansi }}. All rights reserved.</p>
+    <div class="text-center pt-2.5 pb-safe relative z-10 border-t border-slate-100 text-[10px] text-slate-400 leading-tight">
+        <p>&copy; {{ date('Y') }} <strong class="text-slate-600">IT RSKB Ropanasuri</strong></p>
+        <p class="text-[9px] text-slate-400 mt-0.5">(Luthfi Ariesto Prayoga &amp; Teddi Takejo Saogok)</p>
     </div>
 </div>
 @endsection

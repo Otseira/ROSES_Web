@@ -200,9 +200,15 @@
         </form>
 
         <!-- Informasi Khusus Android vs iPhone -->
-        <div class="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+        <div class="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
             <span>📱 <strong>iPhone:</strong> ROSES Web</span>
             <span>🤖 <strong>Android:</strong> ROSES Mobile APK</span>
+        </div>
+
+        <!-- Copyright Footer -->
+        <div class="mt-3 pt-3 border-t border-slate-100 text-center text-[10px] sm:text-[11px] text-slate-400 leading-relaxed">
+            &copy; {{ date('Y') }} <strong class="text-slate-600">IT RSKB Ropanasuri</strong><br>
+            (Luthfi Ariesto Prayoga &amp; Teddi Takejo Saogok)
         </div>
     </div>
 

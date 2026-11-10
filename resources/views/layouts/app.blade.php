@@ -236,8 +236,15 @@
                 </div>
             </header>
 
-            <div class="flex-1 overflow-x-hidden overflow-y-auto p-8 bg-slate-50">
-                @yield('content')
+            <div class="flex-1 overflow-x-hidden overflow-y-auto p-8 bg-slate-50 flex flex-col justify-between">
+                <div>
+                    @yield('content')
+                </div>
+
+                <footer class="mt-8 pt-4 border-t border-slate-200/80 text-center sm:flex sm:items-center sm:justify-between text-xs text-slate-400">
+                    <p>&copy; {{ date('Y') }} <strong class="text-slate-600">IT RSKB Ropanasuri</strong> (Luthfi Ariesto Prayoga &amp; Teddi Takejo Saogok). All rights reserved.</p>
+                    <p class="mt-1 sm:mt-0 font-medium text-slate-500">ROSES Web Portal</p>
+                </footer>
             </div>
 
         </main>

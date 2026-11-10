@@ -581,8 +581,12 @@
             </form>
         </div>
 
-        <div class="text-center pt-2 text-[11px] text-slate-400">
-            ROSES Mobile Web v1.0 • {{ $namaInstansi }}
+        <div class="text-center pt-2 text-[11px] text-slate-400 leading-relaxed">
+            <div>ROSES Mobile Web v1.0 • {{ $namaInstansi }}</div>
+            <div class="text-[10px] mt-1">
+                &copy; {{ date('Y') }} <strong class="text-slate-600">IT RSKB Ropanasuri</strong><br>
+                (Luthfi Ariesto Prayoga &amp; Teddi Takejo Saogok)
+            </div>
         </div>
     </div>
 
