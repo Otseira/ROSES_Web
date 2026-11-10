@@ -155,6 +155,22 @@ class User extends Authenticatable
     }
 
     /**
+     * Cek apakah user memiliki hak validasi lembur / on-call / ambil jam
+     */
+    public function canValidasi(): bool
+    {
+        return $this->isManajemen() || $this->hasGlobalAccess();
+    }
+
+    /**
+     * Cek apakah unit kerja user menganut sistem kompensasi ganti jam (Bank Jam)
+     */
+    public function isGantiJam(): bool
+    {
+        return $this->unitKerja ? $this->unitKerja->isGantiJam() : false;
+    }
+
+    /**
      * Cek apakah user memiliki akses global (Direktur, HRD, atau Superadmin)
      */
     public function hasGlobalAccess(): bool

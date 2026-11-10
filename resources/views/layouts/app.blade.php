@@ -95,6 +95,12 @@
                     <span x-show="sidebarOpen">Dashboard</span>
                 </a>
 
+                <a href="{{ route('app.index') }}" target="_blank"
+                    class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 font-medium">
+                    <i data-lucide="smartphone" class="w-5 h-5 text-emerald-400"></i>
+                    <span x-show="sidebarOpen">SIRO Mobile (Web)</span>
+                </a>
+
                 @if(in_array($userRole, ['superadmin', 'hrd', 'direktur']))
                 <div x-show="sidebarOpen"
                     class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 mt-6 px-3">Master Data

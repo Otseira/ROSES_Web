@@ -15,8 +15,12 @@ class WebAuthController extends Controller
      */
     public function showLogin()
     {
-        // Jika user sudah login, langsung arahkan ke dashboard
+        // Jika user sudah login, langsung arahkan sesuai role
         if (Auth::check()) {
+            $user = Auth::user();
+            if (in_array($user->role, ['staf', 'karyawan'])) {
+                return redirect()->route('app.index');
+            }
             return redirect()->intended('/dashboard');
         }
 
@@ -52,20 +56,8 @@ class WebAuthController extends Controller
             ])->withInput($request->only('login'));
         }
 
-        // 4. Cek Role (Menggunakan Config, bukan hardcoded)
-        $blockedRoles = config('auth.blocked_web_roles', ['staf', 'karyawan']);
-        if (in_array($user->role, $blockedRoles)) {
-            Log::warning('Percobaan akses web ditolak (Role tidak diizinkan)', [
-                'user_id' => $user->id,
-                'nik' => $user->nik,
-                'role' => $user->role,
-                'ip_address' => $request->ip(),
-            ]);
-
-            return back()->withErrors([
-                'login' => 'Akses ditolak. Staf/Karyawan hanya diizinkan mengakses aplikasi mobile.',
-            ])->withInput($request->only('login'));
-        }
+        // 4. Deteksi Role Staf/Karyawan untuk Pengalihan ke Web Mobile (/app)
+        $isMobileOnlyRole = in_array($user->role, ['staf', 'karyawan']);
 
         // 5. Cek Status Akun Aktif
         if (isset($user->is_active) && !$user->is_active) {
@@ -91,6 +83,11 @@ class WebAuthController extends Controller
             'role' => $user->role,
             'ip_address' => $request->ip(),
         ]);
+
+        // Staf / Karyawan otomatis dialihkan ke SIRO Mobile Web (/app)
+        if ($isMobileOnlyRole || $request->input('target') === 'mobile') {
+            return redirect()->route('app.index');
+        }
 
         return redirect()->intended('/dashboard');
     }

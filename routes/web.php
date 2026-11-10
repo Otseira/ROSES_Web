@@ -11,6 +11,7 @@ use App\Http\Controllers\WebShiftController;
 use App\Http\Controllers\WebUnitKerjaController;
 use App\Http\Controllers\WebHakAksesController;
 use App\Http\Controllers\WebPengaturanController;
+use App\Http\Controllers\WebMobileController;
 
 /*
 |--------------------------------------------------------------------------
@@ -77,4 +78,44 @@ Route::middleware('auth')->group(function () {
     // 8. Manajemen Profil & Password User
     Route::get('/profil/ubah-password', [WebAuthController::class, 'editPassword'])->name('profil.ubah-password');
     Route::post('/profil/ubah-password', [WebAuthController::class, 'updatePassword'])->name('profil.update-password');
+});
+
+/*
+|--------------------------------------------------------------------------
+| SIROM Web (Aplikasi Mobile Versi Web untuk iOS / iPhone / Android)
+|--------------------------------------------------------------------------
+*/
+// Shortcut redirect /m ke /app
+Route::redirect('/m', '/app');
+
+Route::prefix('app')->name('app.')->group(function () {
+    // Web App Manifest untuk PWA
+    Route::get('/manifest.json', [WebMobileController::class, 'manifest'])->name('manifest');
+
+    // Autentikasi Khusus Web Mobile
+    Route::get('/login', [WebMobileController::class, 'loginView'])->name('login');
+    Route::post('/login', [WebMobileController::class, 'loginAction'])->name('login.post');
+    Route::post('/logout', [WebMobileController::class, 'logout'])->name('logout');
+
+    // Area Terproteksi Web Mobile
+    Route::middleware('auth')->group(function () {
+        Route::get('/', [WebMobileController::class, 'index'])->name('index');
+
+        // Internal Ajax/Fetch endpoints untuk Single Page Mobile Web
+        Route::get('/api/today-status', [WebMobileController::class, 'todayStatus'])->name('api.today-status');
+        Route::post('/api/check-location', [WebMobileController::class, 'checkLocation'])->name('api.check-location');
+        Route::post('/api/absensi/masuk', [WebMobileController::class, 'clockIn'])->name('api.absensi.masuk');
+        Route::post('/api/absensi/pulang', [WebMobileController::class, 'clockOut'])->name('api.absensi.pulang');
+        Route::get('/api/jadwal-dinas', [WebMobileController::class, 'jadwalDinas'])->name('api.jadwal-dinas');
+        Route::get('/api/lembur-data', [WebMobileController::class, 'lemburData'])->name('api.lembur-data');
+        Route::post('/api/lembur/ekstensi', [WebMobileController::class, 'storeEkstensi'])->name('api.lembur.ekstensi');
+        Route::post('/api/lembur/oncall-masuk', [WebMobileController::class, 'clockInOnCall'])->name('api.lembur.oncall-masuk');
+        Route::post('/api/lembur/oncall-keluar', [WebMobileController::class, 'clockOutOnCall'])->name('api.lembur.oncall-keluar');
+        Route::post('/api/lembur/ambil-jam', [WebMobileController::class, 'storePengambilanJam'])->name('api.lembur.ambil-jam');
+        Route::get('/api/validasi-list', [WebMobileController::class, 'validasiList'])->name('api.validasi-list');
+        Route::post('/api/validasi/proses/{id}', [WebMobileController::class, 'validasiProses'])->name('api.validasi.proses');
+        Route::post('/api/validasi/ambil-jam/{id}', [WebMobileController::class, 'validasiPengambilanProses'])->name('api.validasi.ambil-jam');
+        Route::post('/api/profil/foto', [WebMobileController::class, 'updateFotoProfil'])->name('api.profil.foto');
+        Route::post('/api/profil/password', [WebMobileController::class, 'updatePassword'])->name('api.profil.password');
+    });
 });
