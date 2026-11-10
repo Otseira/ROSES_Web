@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="id" class="h-full">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -7,7 +7,7 @@
 
     <!-- Apple iOS Safari PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="SIRO Mobile">
     <meta name="theme-color" content="#10B981">
     <meta name="format-detection" content="telephone=no">
@@ -20,7 +20,7 @@
     <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 
     <!-- Tailwind CSS (CDN dengan Palette Emerald Identik Flutter SIROM) -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -29,7 +29,7 @@
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+                        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'SF Pro Text', 'Segoe UI', 'Roboto', 'sans-serif'],
                     },
                     colors: {
                         primary: {
@@ -62,7 +62,7 @@
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <style>
-        /* iOS Safe Area Padding */
+        /* iPhone iOS Safe Area Variables */
         :root {
             --sat: env(safe-area-inset-top, 0px);
             --sab: env(safe-area-inset-bottom, 0px);
@@ -70,13 +70,37 @@
             --sar: env(safe-area-inset-right, 0px);
         }
 
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        html, body {
+            height: 100%;
             -webkit-tap-highlight-color: transparent;
             -webkit-touch-callout: none;
-            user-select: none;
-            padding-top: var(--sat);
-            padding-bottom: var(--sab);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+            background-color: #F8FAFC;
+        }
+
+        /* Responsive Utilities untuk iPhone */
+        .min-h-dvh {
+            min-height: 100vh;
+            min-height: 100dvh;
+        }
+
+        .pt-safe {
+            padding-top: max(0.75rem, env(safe-area-inset-top));
+        }
+
+        .pb-safe {
+            padding-bottom: max(1rem, env(safe-area-inset-bottom));
+        }
+
+        .pb-bottom-nav {
+            padding-bottom: calc(5.75rem + env(safe-area-inset-bottom));
+        }
+
+        .bottom-nav-safe {
+            bottom: max(0.75rem, env(safe-area-inset-bottom));
         }
 
         /* Hilangkan Scrollbar default tapi tetap bisa scroll */
@@ -113,10 +137,14 @@
     </style>
     @stack('styles')
 </head>
-<body class="bg-slate-100 min-h-screen text-slate-800 antialiased flex flex-col justify-between">
 
-    <!-- Mobile Screen Frame (Maksimal Lebar Layar Mobile / Responsive) -->
-    <div class="w-full max-w-md mx-auto min-h-screen bg-background flex flex-col relative shadow-xl overflow-x-hidden">
+<body class="bg-slate-100 sm:bg-slate-900/10 min-h-dvh text-slate-800 antialiased flex flex-col justify-between selection:bg-emerald-500 selection:text-white">
+
+    <!-- Mobile Device Container: 
+         - Di Smartphone / iPhone (semua ukuran: SE, 12, 13, 14, 15, 16 Pro/Max): 100% Edge-to-Edge Fluid Width.
+         - Di Desktop PC / Laptop: Membentuk frame smartphone estetik maksimal 430px (lebar iPhone Pro Max). 
+    -->
+    <div class="w-full min-h-dvh bg-background flex flex-col relative sm:max-w-[430px] sm:mx-auto sm:my-4 sm:rounded-[44px] sm:shadow-2xl sm:border sm:border-slate-200/80 sm:overflow-hidden overflow-x-hidden">
         
         @yield('content')
 
@@ -130,7 +158,6 @@
             }
         });
 
-        // Re-run Lucide saat Alpine merender ulang komponen
         document.addEventListener('alpine:initialized', () => {
             if (window.lucide) {
                 setTimeout(() => lucide.createIcons(), 50);

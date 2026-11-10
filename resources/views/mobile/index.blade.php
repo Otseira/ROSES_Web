@@ -11,10 +11,10 @@
     $isGantiJam = $user->isGantiJam();
 @endphp
 
-<div x-data="siroMobileApp()" x-init="initApp()" class="flex-1 flex flex-col min-h-screen relative pb-24 select-none">
+<div x-data="siroMobileApp()" x-init="initApp()" class="flex-1 flex flex-col min-h-dvh relative pb-bottom-nav select-none">
 
-    <!-- Top App Bar (Header Tetap) -->
-    <header class="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-100 px-4 py-3 flex items-center justify-between shadow-xs">
+    <!-- Top App Bar (Header Tetap, Safe Area Top Aware untuk Notch / Dynamic Island iPhone) -->
+    <header class="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-100 px-4 pt-safe pb-3 flex items-center justify-between shadow-xs">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-100 p-1.5 flex items-center justify-center shrink-0">
                 @if($logo)
@@ -587,9 +587,9 @@
     </div>
 
     <!-- =================================================================== -->
-    <!-- FLOATING BOTTOM NAVIGATION BAR (IDENTIK FLUTTER SIROM) -->
+    <!-- FLOATING BOTTOM NAVIGATION BAR (IDENTIK FLUTTER SIROM, SAFE AREA IPHONE) -->
     <!-- =================================================================== -->
-    <nav class="fixed bottom-3 inset-x-0 max-w-[410px] mx-auto z-40 px-3 pointer-events-none">
+    <nav class="fixed inset-x-0 bottom-nav-safe max-w-[430px] mx-auto z-40 px-3.5 pointer-events-none">
         <div class="bg-white/95 backdrop-blur-xl border border-slate-200/80 rounded-full px-2 py-1.5 shadow-2xl flex items-center justify-around pointer-events-auto">
             
             <!-- Tab Beranda -->
@@ -639,10 +639,10 @@
     <!-- =================================================================== -->
     <!-- MODAL 1: KAMERA & PRESENSI (MASUK / PULANG) -->
     <!-- =================================================================== -->
-    <div x-show="showAbsenModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
+    <div x-show="showAbsenModal" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-sm"
          x-transition:enter="transition ease-out duration-200" x-transition:leave="transition ease-in duration-150">
         
-        <div class="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+        <div class="bg-white rounded-t-[32px] sm:rounded-3xl w-full max-w-md sm:max-w-sm overflow-hidden shadow-2xl flex flex-col max-h-[92dvh] pb-safe sm:pb-0">
             <!-- Header Modal -->
             <div class="p-4 border-b border-slate-100 flex items-center justify-between">
                 <div>
@@ -728,8 +728,8 @@
     <!-- =================================================================== -->
     <!-- MODAL 2: DETAIL JADWAL DINAS TANGGAL -->
     <!-- =================================================================== -->
-    <div x-show="showRosterDetailModal" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-        <div class="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
+    <div x-show="showRosterDetailModal" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/70 backdrop-blur-xs">
+        <div class="bg-white rounded-t-[32px] sm:rounded-3xl w-full max-w-md sm:max-w-sm p-5 space-y-4 shadow-2xl pb-safe sm:pb-5">
             <div class="flex items-center justify-between pb-2 border-b border-slate-100">
                 <h3 class="text-sm font-black text-slate-900" x-text="'Detail Jadwal Tanggal ' + (selectedRosterDay?.tanggal || '')"></h3>
                 <button @click="showRosterDetailModal = false" class="text-slate-400 hover:text-slate-600">
@@ -773,8 +773,8 @@
     <!-- =================================================================== -->
     <!-- MODAL 3: AJUKAN EKSTENSI LEMBUR -->
     <!-- =================================================================== -->
-    <div x-show="showEkstensiModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-        <div class="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
+    <div x-show="showEkstensiModal" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/70 backdrop-blur-xs">
+        <div class="bg-white rounded-t-[32px] sm:rounded-3xl w-full max-w-md sm:max-w-sm p-5 space-y-4 shadow-2xl pb-safe sm:pb-5">
             <div class="flex items-center justify-between pb-2 border-b border-slate-100">
                 <h3 class="text-sm font-black text-slate-900">Ajukan Lembur Ekstensi</h3>
                 <button @click="showEkstensiModal = false" class="text-slate-400"><i data-lucide="x" class="w-5 h-5"></i></button>
@@ -811,8 +811,8 @@
     <!-- =================================================================== -->
     <!-- MODAL 4: ON-CALL DARURAT (MASUK / KELUAR) -->
     <!-- =================================================================== -->
-    <div x-show="showOnCallModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-        <div class="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
+    <div x-show="showOnCallModal" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/70 backdrop-blur-xs">
+        <div class="bg-white rounded-t-[32px] sm:rounded-3xl w-full max-w-md sm:max-w-sm p-5 space-y-4 shadow-2xl pb-safe sm:pb-5">
             <div class="flex items-center justify-between pb-2 border-b border-slate-100">
                 <h3 class="text-sm font-black text-slate-900" x-text="isOnCallClockOut ? 'Akhiri Sesi On-Call' : 'Mulai On-Call Darurat'"></h3>
                 <button @click="showOnCallModal = false" class="text-slate-400"><i data-lucide="x" class="w-5 h-5"></i></button>
@@ -839,8 +839,8 @@
     <!-- =================================================================== -->
     <!-- MODAL 5: AMBIL SALDO JAM (TIME-OFF IN LIEU) -->
     <!-- =================================================================== -->
-    <div x-show="showAmbilJamModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-        <div class="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
+    <div x-show="showAmbilJamModal" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/70 backdrop-blur-xs">
+        <div class="bg-white rounded-t-[32px] sm:rounded-3xl w-full max-w-md sm:max-w-sm p-5 space-y-4 shadow-2xl pb-safe sm:pb-5">
             <div class="flex items-center justify-between pb-2 border-b border-slate-100">
                 <h3 class="text-sm font-black text-slate-900">Ajukan Pengambilan Saldo Jam</h3>
                 <button @click="showAmbilJamModal = false" class="text-slate-400"><i data-lucide="x" class="w-5 h-5"></i></button>
@@ -872,8 +872,8 @@
     <!-- =================================================================== -->
     <!-- MODAL 6: UBAH KATA SANDI -->
     <!-- =================================================================== -->
-    <div x-show="showUbahPasswordModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-        <div class="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
+    <div x-show="showUbahPasswordModal" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/70 backdrop-blur-xs">
+        <div class="bg-white rounded-t-[32px] sm:rounded-3xl w-full max-w-md sm:max-w-sm p-5 space-y-4 shadow-2xl pb-safe sm:pb-5">
             <div class="flex items-center justify-between pb-2 border-b border-slate-100">
                 <h3 class="text-sm font-black text-slate-900">Ubah Kata Sandi</h3>
                 <button @click="showUbahPasswordModal = false" class="text-slate-400"><i data-lucide="x" class="w-5 h-5"></i></button>
