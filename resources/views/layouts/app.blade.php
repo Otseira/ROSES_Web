@@ -98,7 +98,7 @@
                 <a href="{{ route('app.index') }}" target="_blank"
                     class="flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 font-medium">
                     <i data-lucide="smartphone" class="w-5 h-5 text-emerald-400"></i>
-                    <span x-show="sidebarOpen">SIRO Mobile (Web)</span>
+                    <span x-show="sidebarOpen">ROSES Mobile (Web)</span>
                 </a>
 
                 @if(in_array($userRole, ['superadmin', 'hrd', 'direktur']))

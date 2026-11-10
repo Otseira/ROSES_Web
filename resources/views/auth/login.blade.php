@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Login - SIM Absensi & Mobile RS</title>
+    <title>Login - ROSES RS</title>
     
     <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -93,7 +93,7 @@
             @csrf
 
             <!-- ============================================================== -->
-            <!-- PILIHAN PROSES / PORTAL: WEB DASHBOARD vs MOBILE WEB (iPHONE) -->
+            <!-- PILIHAN PROSES / PORTAL: ROSES WEB vs ROSES MOBILE (iPHONE) -->
             <!-- ============================================================== -->
             <div>
                 <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
@@ -110,12 +110,12 @@
                             class="py-2.5 px-3 rounded-xl text-xs flex flex-col items-center justify-center gap-1 transition-all">
                         <div class="flex items-center gap-1.5">
                             <i data-lucide="layout-dashboard" class="w-4 h-4" :class="portal === 'web' ? 'text-accent' : 'text-slate-400'"></i>
-                            <span>Portal Web</span>
+                            <span>ROSES Web</span>
                         </div>
                         <span class="text-[10px] text-slate-400 font-normal">Manajemen & PC</span>
                     </button>
 
-                    <!-- Opsi 2: SIRO Mobile (iPhone / Karyawan) -->
+                    <!-- Opsi 2: ROSES Mobile (iPhone / Karyawan) -->
                     <button type="button" 
                             @click="portal = 'mobile'" 
                             :class="portal === 'mobile' 
@@ -124,7 +124,7 @@
                             class="py-2.5 px-3 rounded-xl text-xs flex flex-col items-center justify-center gap-1 transition-all">
                         <div class="flex items-center gap-1.5">
                             <i data-lucide="smartphone" class="w-4 h-4" :class="portal === 'mobile' ? 'text-white' : 'text-slate-400'"></i>
-                            <span>SIRO Mobile</span>
+                            <span>ROSES Mobile</span>
                         </div>
                         <span class="text-[10px] font-normal" :class="portal === 'mobile' ? 'text-emerald-100' : 'text-slate-400'">Khusus iPhone</span>
                     </button>
@@ -186,13 +186,13 @@
                 class="w-full text-white font-bold py-3.5 px-4 rounded-2xl shadow-lg transition-all flex justify-center items-center gap-2 mt-5 text-sm active:scale-[0.98]">
                 <template x-if="portal === 'web'">
                     <div class="flex items-center gap-2">
-                        <span>Masuk ke Dashboard Web</span>
+                        <span>Masuk ke ROSES Web</span>
                         <i data-lucide="arrow-right" class="w-4 h-4"></i>
                     </div>
                 </template>
                 <template x-if="portal === 'mobile'">
                     <div class="flex items-center gap-2">
-                        <span>Masuk ke SIRO Mobile</span>
+                        <span>Masuk ke ROSES Mobile</span>
                         <i data-lucide="smartphone" class="w-4 h-4"></i>
                     </div>
                 </template>
@@ -201,8 +201,8 @@
 
         <!-- Informasi Khusus Android vs iPhone -->
         <div class="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-            <span>📱 <strong>iPhone:</strong> SIRO Web</span>
-            <span>🤖 <strong>Android:</strong> Aplikasi APK</span>
+            <span>📱 <strong>iPhone:</strong> ROSES Web</span>
+            <span>🤖 <strong>Android:</strong> ROSES Mobile APK</span>
         </div>
     </div>
 

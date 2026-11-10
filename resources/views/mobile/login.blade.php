@@ -1,6 +1,6 @@
 @extends('mobile.layout')
 
-@section('title', 'Login - SIRO Mobile')
+@section('title', 'Login - ROSES Mobile')
 
 @section('content')
 @php
@@ -40,7 +40,7 @@
         </div>
 
         <h1 class="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight">{{ $namaInstansi }}</h1>
-        <p class="text-[11px] sm:text-xs font-semibold text-emerald-600 mt-0.5 uppercase tracking-wider">SIRO Mobile Web</p>
+        <p class="text-[11px] sm:text-xs font-semibold text-emerald-600 mt-0.5 uppercase tracking-wider">ROSES Mobile Web</p>
         <p class="text-[11px] sm:text-xs text-slate-500 mt-1 max-w-xs mx-auto leading-relaxed">{{ $tagline }}</p>
     </div>
 
@@ -60,7 +60,7 @@
             @csrf
 
             <!-- ============================================================== -->
-            <!-- PILIHAN PROSES / PORTAL: SIRO MOBILE vs PORTAL WEB -->
+            <!-- PILIHAN PROSES / PORTAL: ROSES MOBILE vs PORTAL WEB -->
             <!-- ============================================================== -->
             <div>
                 <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Pilih Portal Masuk</label>
@@ -70,7 +70,7 @@
                             :class="portal === 'mobile' ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white font-bold shadow-xs' : 'text-slate-500 font-medium hover:text-slate-800'"
                             class="py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all">
                         <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
-                        <span>SIRO Mobile</span>
+                        <span>ROSES Mobile</span>
                     </button>
 
                     <button type="button" 
@@ -134,7 +134,7 @@
                     class="w-full mt-3 py-3.5 px-6 rounded-2xl text-white font-bold text-xs sm:text-sm tracking-wide shadow-lg flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-75 disabled:pointer-events-none">
                 <template x-if="!loading">
                     <div class="flex items-center gap-2">
-                        <span x-text="portal === 'mobile' ? 'Masuk ke SIRO Mobile' : 'Masuk ke Dashboard Web'"></span>
+                        <span x-text="portal === 'mobile' ? 'Masuk ke ROSES Mobile' : 'Masuk ke Dashboard Web'"></span>
                         <i data-lucide="arrow-right" class="w-4 h-4"></i>
                     </div>
                 </template>

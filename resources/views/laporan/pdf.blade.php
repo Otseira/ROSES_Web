@@ -331,7 +331,7 @@
         <div class="head">
             <div>
                 <h1>RSKB ROPANASURI — LAPORAN REKAPITULASI ABSENSI & LEMBUR</h1>
-                <p>Sistem Informasi Roster & Absensi (SIRO) • Unit: <b>{{ $unitNama ?? 'Semua Unit Kerja' }}</b></p>
+                <p>Sistem Informasi Roster & Absensi (ROSES) • Unit: <b>{{ $unitNama ?? 'Semua Unit Kerja' }}</b></p>
             </div>
             <div class="right">
                 <span class="period">{{ $periodLabel }}</span>
@@ -455,7 +455,7 @@
             </div>
         </div>
 
-        <p class="note">Dokumen resmi dicetak secara otomatis dari Sistem Informasi Roster & Absensi (SIRO) RSKB Ropanasuri. Data kehadiran bersifat mengikat sesuai log sistem pada tanggal pencetakan.</p>
+        <p class="note">Dokumen resmi dicetak secara otomatis dari Sistem Informasi Roster & Absensi (ROSES) RSKB Ropanasuri. Data kehadiran bersifat mengikat sesuai log sistem pada tanggal pencetakan.</p>
     </div>
 
 </body>

@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\Log;
 class WebMobileController extends Controller
 {
     /**
-     * Tampilan Login khusus Web Mobile (SIROM Web)
+     * Tampilan Login khusus Web Mobile (ROSES Mobile Web)
      */
     public function loginView()
     {
@@ -91,7 +91,7 @@ class WebMobileController extends Controller
     }
 
     /**
-     * Shell Aplikasi Utama SIROM Web
+     * Shell Aplikasi Utama ROSES Mobile Web
      */
     public function index(Request $request)
     {
@@ -396,8 +396,8 @@ class WebMobileController extends Controller
     public function manifest(): JsonResponse
     {
         $pengaturan = PengaturanAplikasi::first();
-        $name = $pengaturan?->nama_instansi ?: 'SIRO Mobile';
-        $shortName = 'SIROM';
+        $name = $pengaturan?->nama_instansi ?: 'ROSES Mobile';
+        $shortName = 'ROSES';
         $base = rtrim((string) config('app.url'), '/');
         $logo = $pengaturan?->logo ? $base . '/storage/' . $pengaturan->logo : '/favicon.ico';
 

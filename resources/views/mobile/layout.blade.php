@@ -8,14 +8,14 @@
     <!-- Apple iOS Safari PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="SIRO Mobile">
+    <meta name="apple-mobile-web-app-title" content="ROSES Mobile">
     <meta name="theme-color" content="#10B981">
     <meta name="format-detection" content="telephone=no">
 
     <link rel="manifest" href="{{ route('app.manifest') }}">
     <link rel="icon" type="image/png" href="{{ asset('favicon.ico') }}">
 
-    <title>@yield('title', 'SIRO Mobile')</title>
+    <title>@yield('title', 'ROSES Mobile')</title>
 
     <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">

@@ -50,7 +50,7 @@
         <div>
             <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md border border-white/10 px-3 py-1 rounded-full text-xs font-semibold text-accent mb-3 shadow-sm">
                 <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>SIRO • RSKB Ropanasuri</span>
+                <span>ROSES • RSKB Ropanasuri</span>
             </div>
             <h2 class="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight mb-2 text-white">
                 {{ $salam }}, {{ $userLogin->name }}! 👋

@@ -1,6 +1,6 @@
 @extends('mobile.layout')
 
-@section('title', 'SIRO Mobile - ' . ($pengaturan?->nama_instansi ?: 'RSI Ropanasuri'))
+@section('title', 'ROSES Mobile - ' . ($pengaturan?->nama_instansi ?: 'RSI Ropanasuri'))
 
 @section('content')
 @php
@@ -27,7 +27,7 @@
                 <h1 class="text-sm font-black text-slate-900 leading-tight">{{ $namaInstansi }}</h1>
                 <p class="text-[11px] font-semibold text-emerald-600 flex items-center gap-1">
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    SIRO Mobile Web
+                    ROSES Mobile Web
                 </p>
             </div>
         </div>
@@ -582,7 +582,7 @@
         </div>
 
         <div class="text-center pt-2 text-[11px] text-slate-400">
-            SIRO Mobile Web v1.0 • {{ $namaInstansi }}
+            ROSES Mobile Web v1.0 • {{ $namaInstansi }}
         </div>
     </div>
 

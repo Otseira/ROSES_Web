@@ -85,7 +85,7 @@ class WebAuthController extends Controller
 
         $targetPortal = $request->input('target_portal', 'web');
 
-        // Jika user memilih Portal Mobile (SIRO Mobile iPhone):
+        // Jika user memilih Portal Mobile (ROSES Mobile iPhone):
         if ($targetPortal === 'mobile' || $request->input('target') === 'mobile') {
             return redirect()->route('app.index');
         }
@@ -94,8 +94,8 @@ class WebAuthController extends Controller
         // Cek apakah role user dibatasi di dashboard desktop (misal staf/karyawan)
         $blockedRoles = config('auth.blocked_web_roles', ['staf', 'karyawan']);
         if (in_array($user->role, $blockedRoles)) {
-            Log::info('Staf dialihkan ke SIRO Mobile dari login web', ['user_id' => $user->id]);
-            return redirect()->route('app.index')->with('info', 'Akses Dashboard Web dibatasi untuk manajemen. Anda telah dialihkan ke SIRO Mobile.');
+            Log::info('Staf dialihkan ke ROSES Mobile dari login web', ['user_id' => $user->id]);
+            return redirect()->route('app.index')->with('info', 'Akses Dashboard Web dibatasi untuk manajemen. Anda telah dialihkan ke ROSES Mobile.');
         }
 
         return redirect()->intended('/dashboard');

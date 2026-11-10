@@ -82,7 +82,7 @@ Route::middleware('auth')->group(function () {
 
 /*
 |--------------------------------------------------------------------------
-| SIROM Web (Aplikasi Mobile Versi Web untuk iOS / iPhone / Android)
+| ROSES Mobile Web (Aplikasi Mobile Versi Web untuk iOS / iPhone / Android)
 |--------------------------------------------------------------------------
 */
 // Shortcut redirect /m ke /app
