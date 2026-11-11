@@ -706,17 +706,19 @@
                 </div>
 
                 <!-- Kamera Viewfinder Container -->
-                <div class="relative w-full max-w-[280px] mx-auto aspect-[3/4] max-h-[45dvh] bg-slate-900 rounded-3xl overflow-hidden shadow-inner flex items-center justify-center">
+                <div class="relative w-full max-w-[320px] mx-auto aspect-[3/4] max-h-[48dvh] bg-slate-950 rounded-3xl overflow-hidden shadow-inner flex items-center justify-center">
                     
-                    <!-- Video Stream WebRTC (Flip horizontal agar gerak kanan = kanan, gerak kiri = kiri) -->
-                    <video x-ref="videoElement" autoplay playsinline muted style="transform: scaleX(-1); -webkit-transform: scaleX(-1);" class="w-full h-full object-cover" x-show="cameraStreamActive && !capturedPhotoBlob"></video>
+                    <!-- Video Stream WebRTC (Full-frame wide tanpa crop object-cover, gerak kanan = kanan) -->
+                    <video x-ref="videoElement" autoplay playsinline muted style="transform: scaleX(-1); -webkit-transform: scaleX(-1);" class="w-full h-full object-contain" x-show="cameraStreamActive && !capturedPhotoBlob"></video>
 
                     <!-- Preview Foto yang Sudah Dijepret -->
-                    <img x-show="capturedPhotoBlob" :src="capturedPhotoBlob" class="w-full h-full object-cover" alt="Selfie Preview">
+                    <img x-show="capturedPhotoBlob" :src="capturedPhotoBlob" class="w-full h-full object-contain" alt="Selfie Preview">
 
-                    <!-- Panduan Oval Wajah -->
-                    <div x-show="cameraStreamActive && !capturedPhotoBlob" class="absolute inset-x-8 inset-y-8 border-2 border-dashed border-emerald-400/80 rounded-[50%] pointer-events-none flex items-center justify-center">
-                        <span class="text-[10px] font-bold text-white/80 bg-slate-950/40 px-2 py-0.5 rounded-full">Posisikan Wajah</span>
+                    <!-- Panduan Oval Wajah (Ukuran proporsional agar posisi HP tidak terlalu dekat) -->
+                    <div x-show="cameraStreamActive && !capturedPhotoBlob" class="absolute inset-0 pointer-events-none flex items-center justify-center">
+                        <div class="w-36 h-48 border-2 border-dashed border-emerald-400/80 rounded-[50%] flex items-end justify-center pb-3">
+                            <span class="text-[10px] font-bold text-white/85 bg-slate-950/50 px-2.5 py-0.5 rounded-full">Posisikan Wajah</span>
+                        </div>
                     </div>
 
                     <!-- Placeholder Jika Kamera Belum Aktif atau Native Mode -->
@@ -1619,10 +1621,33 @@ function siroMobileApp() {
             this.cameraStatusMessage = 'Menghubungkan Kamera...';
             try {
                 if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                    this.cameraStream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 800 } },
-                        audio: false
-                    });
+                    try {
+                        // Gunakan rasio 4:3 resolusi penuh agar sensor iPhone memakai sudut lebar (wide FOV)
+                        this.cameraStream = await navigator.mediaDevices.getUserMedia({
+                            video: {
+                                facingMode: 'user',
+                                aspectRatio: { ideal: 0.75 },
+                                width: { ideal: 960 },
+                                height: { ideal: 1280 }
+                            },
+                            audio: false
+                        });
+                    } catch (_) {
+                        this.cameraStream = await navigator.mediaDevices.getUserMedia({
+                            video: { facingMode: 'user' },
+                            audio: false
+                        });
+                    }
+
+                    // Setel zoom kamera ke nilai minimum (paling lebar) bila perangkat mendukung kontrol zoom
+                    const track = this.cameraStream.getVideoTracks()[0];
+                    if (track && typeof track.getCapabilities === 'function') {
+                        const caps = track.getCapabilities();
+                        if (caps && caps.zoom && typeof caps.zoom.min === 'number') {
+                            track.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] }).catch(() => {});
+                        }
+                    }
+
                     if (this.$refs.videoElement) {
                         this.$refs.videoElement.srcObject = this.cameraStream;
                         await this.$refs.videoElement.play().catch(() => {});
