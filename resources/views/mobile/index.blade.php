@@ -705,18 +705,19 @@
                     </button>
                 </div>
 
-                <!-- Kamera Viewfinder Container -->
-                <div class="relative w-full max-w-[320px] mx-auto aspect-[3/4] max-h-[48dvh] bg-slate-950 rounded-3xl overflow-hidden shadow-inner flex items-center justify-center">
+                <!-- Kamera Viewfinder Container (Rasio dinamis mengikuti orientasi kamera agar tanpa bar hitam & tanpa crop zoom) -->
+                <div class="relative w-full max-w-[340px] mx-auto max-h-[48dvh] bg-slate-950 rounded-3xl overflow-hidden shadow-inner flex items-center justify-center"
+                     :style="`aspect-ratio: ${cameraAspectRatio};`">
                     
-                    <!-- Video Stream WebRTC (Full-frame wide tanpa crop object-cover, gerak kanan = kanan) -->
-                    <video x-ref="videoElement" autoplay playsinline muted style="transform: scaleX(-1); -webkit-transform: scaleX(-1);" class="w-full h-full object-contain" x-show="cameraStreamActive && !capturedPhotoBlob"></video>
+                    <!-- Video Stream WebRTC (Gerak kanan = kanan, tanpa crop) -->
+                    <video x-ref="videoElement" @loadedmetadata="updateCameraAspectRatio($event)" autoplay playsinline muted style="transform: scaleX(-1); -webkit-transform: scaleX(-1);" class="w-full h-full object-cover" x-show="cameraStreamActive && !capturedPhotoBlob"></video>
 
                     <!-- Preview Foto yang Sudah Dijepret -->
-                    <img x-show="capturedPhotoBlob" :src="capturedPhotoBlob" class="w-full h-full object-contain" alt="Selfie Preview">
+                    <img x-show="capturedPhotoBlob" :src="capturedPhotoBlob" class="w-full h-full object-cover" alt="Selfie Preview">
 
-                    <!-- Panduan Oval Wajah (Ukuran proporsional agar posisi HP tidak terlalu dekat) -->
+                    <!-- Panduan Oval Wajah (Proporsional terhadap bingkai kamera) -->
                     <div x-show="cameraStreamActive && !capturedPhotoBlob" class="absolute inset-0 pointer-events-none flex items-center justify-center">
-                        <div class="w-36 h-48 border-2 border-dashed border-emerald-400/80 rounded-[50%] flex items-end justify-center pb-3">
+                        <div class="h-[72%] aspect-[3/4] max-w-[68%] border-2 border-dashed border-emerald-400/80 rounded-[50%] flex items-end justify-center pb-2.5">
                             <span class="text-[10px] font-bold text-white/85 bg-slate-950/50 px-2.5 py-0.5 rounded-full">Posisikan Wajah</span>
                         </div>
                     </div>
@@ -1074,6 +1075,7 @@ function siroMobileApp() {
         absenType: 'masuk',
         cameraStream: null,
         cameraStreamActive: false,
+        cameraAspectRatio: '3 / 4',
         cameraStatusMessage: 'Menghubungkan Kamera...',
         processingPhoto: false,
         capturedPhotoBlob: null,
@@ -1548,7 +1550,7 @@ function siroMobileApp() {
             const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
             const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
             const sizeKb = Math.max(1, Math.round(file.size / 1024));
-            return { dataUrl, file, sizeKb };
+            return { dataUrl, file, sizeKb, width: canvas.width, height: canvas.height };
         },
 
         async compressImageFile(file, maxDim = 720, quality = 0.72) {
@@ -1601,6 +1603,7 @@ function siroMobileApp() {
             this.capturedPhotoBlob = null;
             this.capturedPhotoFile = null;
             this.capturedPhotoSizeLabel = '';
+            this.cameraAspectRatio = '3 / 4';
             this.processingPhoto = false;
             this.showAbsenModal = true;
 
@@ -1616,20 +1619,38 @@ function siroMobileApp() {
             this.showAbsenModal = false;
         },
 
+        updateCameraAspectRatio(event) {
+            const video = event?.target || this.$refs.videoElement;
+            if (video && video.videoWidth && video.videoHeight) {
+                this.cameraAspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+            }
+        },
+
         async initCameraStream() {
             this.cameraStreamActive = false;
             this.cameraStatusMessage = 'Menghubungkan Kamera...';
             try {
                 if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+                    const isPortrait = window.innerHeight >= window.innerWidth;
+
+                    const preferredVideo = (isMobileDevice && isPortrait)
+                        ? {
+                            facingMode: 'user',
+                            aspectRatio: { ideal: 0.75 },
+                            width: { ideal: 1080 },
+                            height: { ideal: 1440 }
+                        }
+                        : {
+                            // Pada webcam laptop/desktop, gunakan mode wide native 1280x720 agar tidak ter-crop ke 640x480
+                            facingMode: 'user',
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        };
+
                     try {
-                        // Gunakan rasio 4:3 resolusi penuh agar sensor iPhone memakai sudut lebar (wide FOV)
                         this.cameraStream = await navigator.mediaDevices.getUserMedia({
-                            video: {
-                                facingMode: 'user',
-                                aspectRatio: { ideal: 0.75 },
-                                width: { ideal: 960 },
-                                height: { ideal: 1280 }
-                            },
+                            video: preferredVideo,
                             audio: false
                         });
                     } catch (_) {
@@ -1651,6 +1672,7 @@ function siroMobileApp() {
                     if (this.$refs.videoElement) {
                         this.$refs.videoElement.srcObject = this.cameraStream;
                         await this.$refs.videoElement.play().catch(() => {});
+                        this.updateCameraAspectRatio();
                         this.cameraStreamActive = true;
                     }
                 } else {
@@ -1731,6 +1753,9 @@ function siroMobileApp() {
             this.processingPhoto = true;
             try {
                 const result = await this.compressImageFile(rawFile, 720, 0.72);
+                if (result.width && result.height) {
+                    this.cameraAspectRatio = `${result.width} / ${result.height}`;
+                }
                 this.capturedPhotoBlob = result.dataUrl;
                 this.capturedPhotoFile = result.file;
                 this.capturedPhotoSizeLabel = `${result.sizeKb} KB`;
