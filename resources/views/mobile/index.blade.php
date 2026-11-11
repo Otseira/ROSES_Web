@@ -708,8 +708,8 @@
                 <!-- Kamera Viewfinder Container -->
                 <div class="relative w-full max-w-[280px] mx-auto aspect-[3/4] max-h-[45dvh] bg-slate-900 rounded-3xl overflow-hidden shadow-inner flex items-center justify-center">
                     
-                    <!-- Video Stream WebRTC (Orientasi normal tanpa mirror) -->
-                    <video x-ref="videoElement" autoplay playsinline muted class="w-full h-full object-cover" x-show="cameraStreamActive && !capturedPhotoBlob"></video>
+                    <!-- Video Stream WebRTC (Flip horizontal agar gerak kanan = kanan, gerak kiri = kiri) -->
+                    <video x-ref="videoElement" autoplay playsinline muted style="transform: scaleX(-1); -webkit-transform: scaleX(-1);" class="w-full h-full object-cover" x-show="cameraStreamActive && !capturedPhotoBlob"></video>
 
                     <!-- Preview Foto yang Sudah Dijepret -->
                     <img x-show="capturedPhotoBlob" :src="capturedPhotoBlob" class="w-full h-full object-cover" alt="Selfie Preview">
@@ -1671,7 +1671,12 @@ function siroMobileApp() {
                 canvas.width = w;
                 canvas.height = h;
                 const ctx = canvas.getContext('2d');
+                // Sesuaikan hasil jepretan dengan orientasi preview kamera (kanan = kanan, kiri = kiri)
+                ctx.save();
+                ctx.translate(w, 0);
+                ctx.scale(-1, 1);
                 ctx.drawImage(video, 0, 0, w, h);
+                ctx.restore();
 
                 const result = await this.compressCanvasToJpeg(canvas, 0.72);
                 this.capturedPhotoBlob = result.dataUrl;
