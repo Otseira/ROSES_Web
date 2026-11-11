@@ -12,7 +12,7 @@
     <meta name="theme-color" content="#10B981">
     <meta name="format-detection" content="telephone=no">
 
-    <link rel="manifest" href="{{ route('app.manifest') }}">
+    <link rel="manifest" href="{{ route('app.manifest', [], false) }}">
     <link rel="icon" type="image/png" href="{{ asset('favicon.ico') }}">
 
     <title>@yield('title', 'ROSES Mobile')</title>

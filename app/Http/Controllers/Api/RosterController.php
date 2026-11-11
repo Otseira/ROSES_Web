@@ -215,17 +215,18 @@ class RosterController extends Controller
         $hari = [];
         for ($d = 1; $d <= $jumlahHari; $d++) {
             $list = $rosters[$d] ?? collect();
-            $r1   = $list->firstWhere('sesi', 1);
+            $r1   = $list->firstWhere('sesi', 1) ?? $list->firstWhere('sesi', null);
             $r2   = $list->firstWhere('sesi', 2);
             $log1 = $r1?->logAbsensi;
             $log2 = $r2?->logAbsensi;
 
-            $shiftNama = $r1?->shift?->nama_shift;
+            $shiftNama = $r1?->custom_nama_shift ?? $r1?->shift?->nama_shift;
             $low = strtolower(trim((string) $shiftNama));
             $libur = ($r1 === null && $r2 === null) || str_contains($low, 'libur') || $low === 'off';
 
             $hari[] = [
                 'tanggal'         => $d,
+                'hari_ke'         => \Carbon\Carbon::createFromDate($tahun, $bulan, $d)->dayOfWeek,
                 'is_libur'        => $libur,
                 'nama_shift'      => $shiftNama,
                 'jam_masuk'       => $libur ? null : $jam($r1, 'masuk'),
@@ -250,11 +251,12 @@ class RosterController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
-                'bulan'       => $bulan,
-                'tahun'       => $tahun,
-                'jumlah_hari' => $jumlahHari,
-                'user_nama'   => $user->name,
-                'hari'        => $hari,
+                'bulan'            => $bulan,
+                'tahun'            => $tahun,
+                'jumlah_hari'      => $jumlahHari,
+                'hari_awal_minggu' => $start->dayOfWeek,
+                'user_nama'        => $user->name,
+                'hari'             => $hari,
             ],
         ], 200, [
             'Cache-Control' => 'no-cache, no-store, must-revalidate',

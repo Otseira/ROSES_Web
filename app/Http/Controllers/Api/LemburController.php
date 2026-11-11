@@ -23,32 +23,14 @@ class LemburController extends Controller
             'keterangan'   => 'required|string|max:500',
             'latitude'     => 'required|numeric|between:-90,90',
             'longitude'    => 'required|numeric|between:-180,180',
-            'foto_masuk'   => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
+            'foto_masuk'   => 'required|image|mimes:jpeg,png,jpg,webp|max:5120',
             'durasi_menit' => 'nullable|integer|min:30|max:720',
-            'accuracy'     => 'nullable|numeric|between:0.1,200',
+            'accuracy'     => 'nullable|numeric|between:0,10000',
             'is_mock'      => 'nullable|string',
         ]);
 
-        // Cek manipulasi Fake GPS
-        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Lembur ekstensi ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
-            ], 403);
-        }
-
-        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Lembur ekstensi ditolak: koordinat GPS tidak valid (0,0).',
-            ], 422);
-        }
-
-        if ($request->filled('accuracy') && (float) $request->accuracy > 80.0) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Akurasi GPS rendah (' . round((float) $request->accuracy) . 'm). Silakan pindah ke area terbuka agar posisi akurat.',
-            ], 422);
+        if (($gpsError = $this->checkGpsIntegrity($request, 'Lembur ekstensi')) !== null) {
+            return $gpsError;
         }
 
         $user  = $request->user()->load('unitKerja');
@@ -179,30 +161,13 @@ class LemburController extends Controller
             'keterangan' => 'required|string|max:500',
             'latitude'   => 'required|numeric|between:-90,90',
             'longitude'  => 'required|numeric|between:-180,180',
-            'foto_masuk' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
-            'accuracy'   => 'nullable|numeric|between:0.1,200',
+            'foto_masuk' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120',
+            'accuracy'   => 'nullable|numeric|between:0,10000',
             'is_mock'    => 'nullable|string',
         ]);
 
-        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
-            return response()->json([
-                'success' => false,
-                'message' => 'On-Call masuk ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
-            ], 403);
-        }
-
-        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
-            return response()->json([
-                'success' => false,
-                'message' => 'On-Call masuk ditolak: koordinat GPS tidak valid (0,0).',
-            ], 422);
-        }
-
-        if ($request->filled('accuracy') && (float) $request->accuracy > 80.0) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Akurasi GPS rendah (' . round((float) $request->accuracy) . 'm). Silakan pindah ke area terbuka agar posisi akurat.',
-            ], 422);
+        if (($gpsError = $this->checkGpsIntegrity($request, 'On-Call masuk')) !== null) {
+            return $gpsError;
         }
 
         $user = $request->user()->load('unitKerja');
@@ -270,30 +235,13 @@ class LemburController extends Controller
         $request->validate([
             'latitude'    => 'required|numeric|between:-90,90',
             'longitude'   => 'required|numeric|between:-180,180',
-            'foto_keluar' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
-            'accuracy'    => 'nullable|numeric|between:0.1,200',
+            'foto_keluar' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120',
+            'accuracy'    => 'nullable|numeric|between:0,10000',
             'is_mock'     => 'nullable|string',
         ]);
 
-        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
-            return response()->json([
-                'success' => false,
-                'message' => 'On-Call keluar ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
-            ], 403);
-        }
-
-        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
-            return response()->json([
-                'success' => false,
-                'message' => 'On-Call keluar ditolak: koordinat GPS tidak valid (0,0).',
-            ], 422);
-        }
-
-        if ($request->filled('accuracy') && (float) $request->accuracy > 80.0) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Akurasi GPS rendah (' . round((float) $request->accuracy) . 'm). Silakan pindah ke area terbuka agar posisi akurat.',
-            ], 422);
+        if (($gpsError = $this->checkGpsIntegrity($request, 'On-Call keluar')) !== null) {
+            return $gpsError;
         }
 
         $user = $request->user()->load('unitKerja');
@@ -1033,6 +981,36 @@ class LemburController extends Controller
         foreach ($candidates as $r) {
             [, $winEnd] = \App\Http\Controllers\Api\AbsensiController::jendelaSesi($r);
             if ($now->gte($winEnd)) return $r;
+        }
+
+        return null;
+    }
+
+    /**
+     * Validasi integritas koordinat GPS, mock location, dan batas akurasi.
+     */
+    private function checkGpsIntegrity(Request $request, string $label): ?\Illuminate\Http\JsonResponse
+    {
+        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
+            return response()->json([
+                'success' => false,
+                'message' => $label . ' ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
+            ], 403);
+        }
+
+        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
+            return response()->json([
+                'success' => false,
+                'message' => $label . ' ditolak: koordinat GPS tidak valid (0,0).',
+            ], 422);
+        }
+
+        $maxAccuracy = $request->is('app/api/*') ? 150.0 : 80.0;
+        if ($request->filled('accuracy') && (float) $request->accuracy > $maxAccuracy) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akurasi GPS rendah (' . round((float) $request->accuracy) . 'm). Silakan pindah ke dekat jendela atau area terbuka agar posisi akurat.',
+            ], 422);
         }
 
         return null;

@@ -155,8 +155,9 @@ class WebMobileController extends Controller
         }
 
         return response()->json([
-            'success' => true,
-            'data'    => [
+            'success'    => true,
+            'csrf_token' => csrf_token(),
+            'data'       => [
                 'tanggal'           => $now->translatedFormat('l, d F Y'),
                 'jam_sekarang'      => $now->format('H:i'),
                 'shift_nama'        => $rosterHariIni?->shift?->nama_shift ?? 'Tanpa Jadwal',
@@ -181,20 +182,44 @@ class WebMobileController extends Controller
     }
 
     /**
+     * Refresh CSRF Token untuk PWA Safari yang baru dibangunkan dari background
+     */
+    public function csrfToken(): JsonResponse
+    {
+        return response()->json([
+            'success'    => true,
+            'csrf_token' => csrf_token(),
+        ]);
+    }
+
+    /**
      * Live Geofencing Distance Check untuk browser/Safari
      */
     public function checkLocation(Request $request): JsonResponse
     {
         $request->validate([
-            'latitude'  => 'required|numeric',
-            'longitude' => 'required|numeric',
+            'latitude'  => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'accuracy'  => 'nullable|numeric',
         ]);
+
+        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
+            return response()->json([
+                'success'        => true,
+                'in_radius'      => false,
+                'accuracy_low'   => true,
+                'distance_meter' => 0,
+                'max_radius'     => 100,
+                'message'        => 'Koordinat GPS tidak valid (0,0). Pastikan GPS iPhone aktif.',
+            ]);
+        }
 
         $pengaturan = PengaturanAplikasi::first();
         if (!$pengaturan || !$pengaturan->latitude || !$pengaturan->longitude) {
             return response()->json([
                 'success'        => true,
                 'in_radius'      => true,
+                'accuracy_low'   => false,
                 'distance_meter' => 0,
                 'max_radius'     => 100,
                 'message'        => 'Titik GPS kantor belum diset (Bebas radius)',
@@ -208,17 +233,29 @@ class WebMobileController extends Controller
             (float) $request->longitude
         );
 
-        $maxRadius = (float) ($pengaturan->radius_meter ?? $pengaturan->radius ?? 50);
+        $maxRadius = (float) $this->getMaxRadius($pengaturan);
         $inRadius = $distance <= $maxRadius;
+
+        $acc = $request->filled('accuracy') ? (float) $request->accuracy : null;
+        $accuracyLow = $acc !== null && $acc > 150.0;
+        $accInfo = $acc !== null ? ' • Akurasi ±' . round($acc) . 'm' : '';
+
+        if ($accuracyLow) {
+            $message = 'Sinyal GPS kurang akurat (±' . round($acc) . 'm). Dekatkan ke jendela atau tekan Refresh GPS.';
+        } elseif ($inRadius) {
+            $message = 'Dalam radius RS (' . round($distance) . 'm dari batas ' . $maxRadius . 'm)' . $accInfo;
+        } else {
+            $message = 'Di luar radius RS (' . round($distance) . 'm dari batas ' . $maxRadius . 'm)' . $accInfo;
+        }
 
         return response()->json([
             'success'        => true,
             'in_radius'      => $inRadius,
+            'accuracy_low'   => $accuracyLow,
             'distance_meter' => round($distance, 1),
             'max_radius'     => $maxRadius,
-            'message'        => $inRadius
-                ? 'Posisi Anda berada di dalam radius RS (' . round($distance) . 'm).'
-                : 'Posisi Anda di luar radius RS (' . round($distance) . 'm dari batas ' . $maxRadius . 'm).',
+            'accuracy'       => $acc !== null ? round($acc, 1) : null,
+            'message'        => $message,
         ]);
     }
 
@@ -398,8 +435,7 @@ class WebMobileController extends Controller
         $pengaturan = PengaturanAplikasi::first();
         $name = $pengaturan?->nama_instansi ?: 'ROSES Mobile';
         $shortName = 'ROSES';
-        $base = rtrim((string) config('app.url'), '/');
-        $logo = $pengaturan?->logo ? $base . '/storage/' . $pengaturan->logo : '/favicon.ico';
+        $logo = $pengaturan?->logo ? '/storage/' . $pengaturan->logo : '/favicon.ico';
 
         $manifest = [
             'name'             => $name,
@@ -428,6 +464,20 @@ class WebMobileController extends Controller
 
         return response()->json($manifest)
             ->header('Content-Type', 'application/manifest+json');
+    }
+
+    /**
+     * Ambil nilai radius dari Pengaturan secara dinamis
+     */
+    private function getMaxRadius(PengaturanAplikasi $pengaturan): int
+    {
+        foreach ($pengaturan->getAttributes() as $key => $val) {
+            if (str_contains($key, 'radius') && $val !== null && $val !== '') {
+                return (int) $val;
+            }
+        }
+
+        return 100;
     }
 
     /**

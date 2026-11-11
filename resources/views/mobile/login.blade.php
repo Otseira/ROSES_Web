@@ -56,7 +56,7 @@
         </div>
         @endif
 
-        <form x-ref="form" method="POST" :action="portal === 'web' ? '{{ route('login.post') }}' : '{{ route('app.login.post') }}'" @submit.prevent="submitForm" class="space-y-3.5">
+        <form x-ref="form" method="POST" :action="portal === 'web' ? '{{ route('login.post', [], false) }}' : '{{ route('app.login.post', [], false) }}'" @submit.prevent="submitForm" class="space-y-3.5">
             @csrf
 
             <!-- ============================================================== -->

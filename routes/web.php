@@ -102,6 +102,7 @@ Route::prefix('app')->name('app.')->group(function () {
         Route::get('/', [WebMobileController::class, 'index'])->name('index');
 
         // Internal Ajax/Fetch endpoints untuk Single Page Mobile Web
+        Route::get('/api/csrf-token', [WebMobileController::class, 'csrfToken'])->name('api.csrf-token');
         Route::get('/api/today-status', [WebMobileController::class, 'todayStatus'])->name('api.today-status');
         Route::post('/api/check-location', [WebMobileController::class, 'checkLocation'])->name('api.check-location');
         Route::post('/api/absensi/masuk', [WebMobileController::class, 'clockIn'])->name('api.absensi.masuk');

@@ -18,39 +18,8 @@ class AbsensiController extends Controller
      */
     public function clockIn(Request $request)
     {
-        $request->validate([
-            'latitude'  => 'required|numeric|between:-90,90',
-            'longitude' => 'required|numeric|between:-180,180',
-            'foto'      => 'required|image|mimes:jpeg,png,jpg,webp|max:3072',
-            'accuracy'  => 'nullable|numeric|between:0.1,200',
-            'is_mock'   => 'nullable|string',
-        ]);
-
-        // Cek indikasi manipulasi lokasi palsu (Fake GPS / Mock)
-        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Absensi ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
-            ], 403);
-        }
-
-        // Koordinat nol (invalid GPS)
-        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Absensi ditolak: koordinat GPS tidak valid (0,0). Pastikan GPS HP Anda aktif.',
-            ], 422);
-        }
-
-        // Cek akurasi sinyal satelit GPS
-        if ($request->filled('accuracy')) {
-            $acc = (float) $request->accuracy;
-            if ($acc > 80.0) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Akurasi GPS rendah (' . round($acc) . 'm). Silakan pindah ke dekat jendela atau area terbuka agar posisi akurat.',
-                ], 422);
-            }
+        if (($invalid = $this->validateAttendancePayload($request, 'Absensi')) !== null) {
+            return $invalid;
         }
 
         $user  = $request->user();
@@ -210,39 +179,8 @@ class AbsensiController extends Controller
      */
     public function clockOut(Request $request)
     {
-        $request->validate([
-            'latitude'  => 'required|numeric|between:-90,90',
-            'longitude' => 'required|numeric|between:-180,180',
-            'foto'      => 'required|image|mimes:jpeg,png,jpg,webp|max:3072',
-            'accuracy'  => 'nullable|numeric|between:0.1,200',
-            'is_mock'   => 'nullable|string',
-        ]);
-
-        // Cek indikasi manipulasi lokasi palsu (Fake GPS / Mock)
-        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Absen pulang ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
-            ], 403);
-        }
-
-        // Koordinat nol (invalid GPS)
-        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Absen pulang ditolak: koordinat GPS tidak valid (0,0). Pastikan GPS HP Anda aktif.',
-            ], 422);
-        }
-
-        // Cek akurasi sinyal satelit GPS
-        if ($request->filled('accuracy')) {
-            $acc = (float) $request->accuracy;
-            if ($acc > 80.0) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Akurasi GPS rendah (' . round($acc) . 'm). Silakan pindah ke dekat jendela atau area terbuka agar posisi akurat.',
-                ], 422);
-            }
+        if (($invalid = $this->validateAttendancePayload($request, 'Absen pulang')) !== null) {
+            return $invalid;
         }
 
         $user = $request->user();
@@ -382,6 +320,51 @@ class AbsensiController extends Controller
         }
 
         $log->save();
+    }
+
+    /**
+     * Validasi payload presensi (koordinat, mock GPS, foto, dan akurasi sinyal).
+     * Web Mobile (/app/api/*) diberi batas akurasi 150m untuk akomodasi Wi-Fi indoor iPhone Safari.
+     */
+    private function validateAttendancePayload(Request $request, string $label = 'Absensi')
+    {
+        $request->validate([
+            'latitude'  => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'foto'      => 'required|image|mimes:jpeg,png,jpg,webp|max:5120',
+            'accuracy'  => 'nullable|numeric|between:0,10000',
+            'is_mock'   => 'nullable|string',
+        ]);
+
+        // Cek indikasi manipulasi lokasi palsu (Fake GPS / Mock)
+        if ($request->boolean('is_mock') || $request->input('is_mock') === '1') {
+            return response()->json([
+                'success' => false,
+                'message' => $label . ' ditolak: terdeteksi penggunaan lokasi palsu (Mock Location / Fake GPS).',
+            ], 403);
+        }
+
+        // Koordinat nol (invalid GPS)
+        if ((float) $request->latitude == 0.0 && (float) $request->longitude == 0.0) {
+            return response()->json([
+                'success' => false,
+                'message' => $label . ' ditolak: koordinat GPS tidak valid (0,0). Pastikan GPS HP Anda aktif.',
+            ], 422);
+        }
+
+        // Cek akurasi sinyal GPS (Safari indoor Wi-Fi iPhone bisa 60-140m)
+        $maxAccuracy = $request->is('app/api/*') ? 150.0 : 80.0;
+        if ($request->filled('accuracy')) {
+            $acc = (float) $request->accuracy;
+            if ($acc > $maxAccuracy) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Akurasi GPS rendah (' . round($acc) . 'm). Silakan pindah ke dekat jendela atau area terbuka lalu tekan Refresh GPS.',
+                ], 422);
+            }
+        }
+
+        return null;
     }
 
     /**

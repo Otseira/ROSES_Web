@@ -4,9 +4,9 @@
 
 @section('content')
 @php
-    $logo = $pengaturan?->logo ? asset('storage/' . $pengaturan->logo) : null;
+    $logo = $pengaturan?->logo ? '/storage/' . $pengaturan->logo : null;
     $namaInstansi = $pengaturan?->nama_instansi ?: 'RSI Ropanasuri';
-    $userFoto = $user->foto_profil ? asset('storage/' . $user->foto_profil) : null;
+    $userFoto = $user->foto_profil ? '/storage/' . $user->foto_profil : null;
     $canValidasi = $user->canValidasi();
     $isGantiJam = $user->isGantiJam();
 @endphp
@@ -32,14 +32,15 @@
             </div>
         </div>
 
-        <button @click="currentTab = 'profil'" class="relative shrink-0">
-            @if($userFoto)
-                <img src="{{ $userFoto }}" alt="{{ $user->name }}" class="w-9 h-9 rounded-full object-cover border-2 border-emerald-500/50 shadow-xs">
-            @else
+        <button @click="switchTab('profil')" class="relative shrink-0">
+            <template x-if="profilePhotoUrl">
+                <img :src="profilePhotoUrl" alt="{{ $user->name }}" class="w-9 h-9 rounded-full object-cover border-2 border-emerald-500/50 shadow-xs">
+            </template>
+            <template x-if="!profilePhotoUrl">
                 <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-primary-600 to-emerald-400 text-white font-bold text-xs flex items-center justify-center shadow-xs">
                     {{ strtoupper(substr($user->name, 0, 2)) }}
                 </div>
-            @endif
+            </template>
         </button>
     </header>
 
@@ -158,7 +159,7 @@
                         <span class="text-[10px] text-slate-500">Kompensasi waktu istirahat / cuti</span>
                     </div>
                 </div>
-                <button @click="currentTab = 'lembur'; subTabLembur = 1" class="px-3 py-1.5 rounded-xl bg-white text-amber-700 font-bold text-xs border border-amber-200 shadow-xs hover:bg-amber-50 active:scale-95 transition-all shrink-0">
+                <button @click="switchTab('lembur'); subTabLembur = 1" class="px-3 py-1.5 rounded-xl bg-white text-amber-700 font-bold text-xs border border-amber-200 shadow-xs hover:bg-amber-50 active:scale-95 transition-all shrink-0">
                     Klaim Jam
                 </button>
             </div>
@@ -201,7 +202,7 @@
                 </div>
             </button>
 
-            <button @click="currentTab = 'jadwal'" class="py-3 px-3.5 rounded-2xl bg-white border border-slate-200/80 hover:bg-slate-50 active:scale-95 text-slate-700 flex items-center gap-3 transition-all shadow-xs">
+            <button @click="switchTab('jadwal')" class="py-3 px-3.5 rounded-2xl bg-white border border-slate-200/80 hover:bg-slate-50 active:scale-95 text-slate-700 flex items-center gap-3 transition-all shadow-xs">
                 <div class="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
                     <i data-lucide="calendar" class="w-4 h-4"></i>
                 </div>
@@ -252,22 +253,31 @@
             </template>
 
             <template x-if="!loadingRoster && rosterDays.length > 0">
-                <div class="grid grid-cols-7 gap-1.5 text-center">
-                    <template x-for="day in ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab']">
-                        <div class="text-[10px] font-bold text-slate-400 pb-1" x-text="day"></div>
+                <div class="grid grid-cols-7 gap-1 sm:gap-1.5 text-center">
+                    <template x-for="(day, dayIdx) in ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab']" :key="day">
+                        <div class="text-[10px] font-bold pb-1.5" :class="dayIdx === 0 ? 'text-rose-500' : 'text-slate-400'" x-text="day"></div>
+                    </template>
+
+                    <!-- Sel kosong sebelum tanggal 1 agar tanggal jatuh tepat pada harinya -->
+                    <template x-for="blankIdx in rosterLeadingBlanks" :key="'blank-' + blankIdx">
+                        <div class="min-h-[48px] sm:min-h-[52px]"></div>
                     </template>
 
                     <template x-for="item in rosterDays" :key="item.tanggal">
                         <div @click="selectedRosterDay = item; showRosterDetailModal = true"
-                             class="p-1 rounded-xl border flex flex-col items-center justify-between min-h-[52px] cursor-pointer active:scale-90 transition-all"
-                             :class="{
-                                 'bg-slate-50 border-slate-200/60 text-slate-400': item.is_libur,
-                                 'bg-emerald-50/70 border-emerald-300 text-emerald-800': item.absen_masuk && item.terlambat_menit === 0,
-                                 'bg-rose-50/70 border-rose-300 text-rose-800': item.absen_masuk && item.terlambat_menit > 0,
-                                 'bg-white border-slate-200 text-slate-700': !item.is_libur && !item.absen_masuk
-                             }">
-                            <span class="text-[11px] font-black" x-text="item.tanggal"></span>
-                            <span class="text-[9px] font-bold truncate max-w-[42px]" x-text="item.is_libur ? 'OFF' : (item.nama_shift || '-')"></span>
+                             class="p-1 rounded-xl border flex flex-col items-center justify-between min-h-[48px] sm:min-h-[52px] cursor-pointer active:scale-90 transition-all"
+                             :class="[
+                                 item.is_libur
+                                     ? 'bg-slate-50 border-slate-200/60 text-slate-400'
+                                     : (item.absen_masuk && item.terlambat_menit === 0
+                                         ? 'bg-emerald-50/70 border-emerald-300 text-emerald-800'
+                                         : (item.absen_masuk && item.terlambat_menit > 0
+                                             ? 'bg-rose-50/70 border-rose-300 text-rose-800'
+                                             : 'bg-white border-slate-200 text-slate-700')),
+                                 isTodayRoster(item.tanggal) ? 'ring-2 ring-primary-500 ring-offset-1' : ''
+                             ]">
+                            <span class="text-[11px] font-black" :class="isSundayRoster(item.tanggal) && !item.absen_masuk ? 'text-rose-500' : ''" x-text="item.tanggal"></span>
+                            <span class="text-[9px] font-bold truncate max-w-[38px] sm:max-w-[44px]" x-text="item.is_libur ? 'OFF' : (item.nama_shift || '-')"></span>
                             <div class="flex items-center gap-0.5 mt-0.5">
                                 <template x-if="item.absen_masuk">
                                     <span class="w-1.5 h-1.5 rounded-full" :class="item.terlambat_menit > 0 ? 'bg-rose-500' : 'bg-emerald-500'"></span>
@@ -523,14 +533,15 @@
         <!-- Header Profil -->
         <div class="bg-white rounded-3xl p-6 border border-slate-100 shadow-xs text-center relative overflow-hidden">
             <div class="relative w-24 h-24 mx-auto mb-3">
-                @if($userFoto)
-                    <img src="{{ $userFoto }}" alt="{{ $user->name }}" class="w-24 h-24 rounded-full object-cover border-4 border-emerald-500/30 shadow-md">
-                @else
+                <template x-if="profilePhotoUrl">
+                    <img :src="profilePhotoUrl" alt="{{ $user->name }}" class="w-24 h-24 rounded-full object-cover border-4 border-emerald-500/30 shadow-md">
+                </template>
+                <template x-if="!profilePhotoUrl">
                     <div class="w-24 h-24 rounded-full bg-gradient-to-tr from-primary-600 to-emerald-400 text-white font-black text-2xl flex items-center justify-center shadow-md">
                         {{ strtoupper(substr($user->name, 0, 2)) }}
                     </div>
-                @endif
-                <button @click="showUploadFotoModal = true" class="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-primary-600 text-white flex items-center justify-center shadow-md hover:bg-primary-700 active:scale-95">
+                </template>
+                <button @click="openUploadFotoModal()" class="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-primary-600 text-white flex items-center justify-center shadow-md hover:bg-primary-700 active:scale-95">
                     <i data-lucide="camera" class="w-4 h-4"></i>
                 </button>
             </div>
@@ -556,7 +567,7 @@
             </button>
 
             @if(in_array($user->role, ['superadmin', 'hrd', 'direktur', 'manajer', 'kepala_unit']))
-            <a href="{{ route('dashboard') }}" class="w-full p-4 flex items-center justify-between hover:bg-slate-50 transition-colors text-slate-800">
+            <a href="{{ route('dashboard', [], false) }}" class="w-full p-4 flex items-center justify-between hover:bg-slate-50 transition-colors text-slate-800">
                 <div class="flex items-center gap-3">
                     <div class="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
                         <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
@@ -567,7 +578,7 @@
             </a>
             @endif
 
-            <form method="POST" action="{{ route('app.logout') }}" class="w-full">
+            <form method="POST" action="{{ route('app.logout', [], false) }}" class="w-full">
                 @csrf
                 <button type="submit" class="w-full p-4 flex items-center justify-between hover:bg-rose-50 transition-colors text-rose-600 font-bold">
                     <div class="flex items-center gap-3">
@@ -597,7 +608,7 @@
         <div class="bg-white/95 backdrop-blur-xl border border-slate-200/80 rounded-full px-2 py-1.5 shadow-2xl flex items-center justify-around pointer-events-auto">
             
             <!-- Tab Beranda -->
-            <button @click="currentTab = 'beranda'" class="flex-1 py-1.5 flex flex-col items-center gap-0.5 relative transition-all"
+            <button @click="switchTab('beranda')" class="flex-1 py-1.5 flex flex-col items-center gap-0.5 relative transition-all"
                     :class="currentTab === 'beranda' ? 'text-primary-600 font-bold' : 'text-slate-400 hover:text-slate-600'">
                 <i data-lucide="home" class="w-5 h-5"></i>
                 <span class="text-[10px]">Beranda</span>
@@ -605,7 +616,7 @@
             </button>
 
             <!-- Tab Jadwal -->
-            <button @click="currentTab = 'jadwal'" class="flex-1 py-1.5 flex flex-col items-center gap-0.5 relative transition-all"
+            <button @click="switchTab('jadwal')" class="flex-1 py-1.5 flex flex-col items-center gap-0.5 relative transition-all"
                     :class="currentTab === 'jadwal' ? 'text-primary-600 font-bold' : 'text-slate-400 hover:text-slate-600'">
                 <i data-lucide="calendar" class="w-5 h-5"></i>
                 <span class="text-[10px]">Jadwal</span>
@@ -613,7 +624,7 @@
             </button>
 
             <!-- Tab Lembur -->
-            <button @click="currentTab = 'lembur'" class="flex-1 py-1.5 flex flex-col items-center gap-0.5 relative transition-all"
+            <button @click="switchTab('lembur')" class="flex-1 py-1.5 flex flex-col items-center gap-0.5 relative transition-all"
                     :class="currentTab === 'lembur' ? 'text-primary-600 font-bold' : 'text-slate-400 hover:text-slate-600'">
                 <i data-lucide="clock" class="w-5 h-5"></i>
                 <span class="text-[10px]">Lembur</span>
@@ -622,7 +633,7 @@
 
             <!-- Tab Validasi (Hanya bila canValidasi) -->
             @if($canValidasi)
-            <button @click="currentTab = 'validasi'" class="flex-1 py-1.5 flex flex-col items-center gap-0.5 relative transition-all"
+            <button @click="switchTab('validasi')" class="flex-1 py-1.5 flex flex-col items-center gap-0.5 relative transition-all"
                     :class="currentTab === 'validasi' ? 'text-primary-600 font-bold' : 'text-slate-400 hover:text-slate-600'">
                 <i data-lucide="check-check" class="w-5 h-5"></i>
                 <span class="text-[10px]">Validasi</span>
@@ -631,7 +642,7 @@
             @endif
 
             <!-- Tab Profil -->
-            <button @click="currentTab = 'profil'" class="flex-1 py-1.5 flex flex-col items-center gap-0.5 relative transition-all"
+            <button @click="switchTab('profil')" class="flex-1 py-1.5 flex flex-col items-center gap-0.5 relative transition-all"
                     :class="currentTab === 'profil' ? 'text-primary-600 font-bold' : 'text-slate-400 hover:text-slate-600'">
                 <i data-lucide="user" class="w-5 h-5"></i>
                 <span class="text-[10px]">Profil</span>
@@ -648,7 +659,7 @@
         
         <div class="bg-white rounded-t-[32px] sm:rounded-3xl w-full max-w-md sm:max-w-sm overflow-hidden shadow-2xl flex flex-col max-h-[92dvh] pb-safe sm:pb-0">
             <!-- Header Modal -->
-            <div class="p-4 border-b border-slate-100 flex items-center justify-between">
+            <div class="p-4 border-b border-slate-100 flex items-center justify-between shrink-0">
                 <div>
                     <h3 class="text-sm font-black text-slate-900" x-text="absenType === 'masuk' ? 'Presensi Masuk Kerja' : 'Presensi Pulang Kerja'"></h3>
                     <p class="text-[11px] text-slate-500">Ambil foto selfie di area rumah sakit</p>
@@ -660,67 +671,98 @@
 
             <!-- Body: Viewfinder Kamera & GPS Status -->
             <div class="p-4 space-y-3 overflow-y-auto">
-                <!-- Status GPS & Geofencing Pill -->
-                <div class="p-3 rounded-2xl flex items-center gap-3 text-xs"
-                     :class="gpsStatus.in_radius ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'">
-                    <i :data-lucide="gpsStatus.in_radius ? 'map-pin' : 'alert-circle'" class="w-5 h-5 shrink-0"
-                       :class="gpsStatus.in_radius ? 'text-emerald-600' : 'text-rose-600'"></i>
-                    <div class="leading-tight">
-                        <div class="font-bold" x-text="gpsStatus.in_radius ? 'Lokasi Valid (Dalam Radius RS)' : 'Di Luar Radius RS'"></div>
-                        <div class="text-[11px] opacity-80" x-text="gpsStatus.message || 'Mengecek koordinat GPS...'"></div>
+                <!-- Status GPS & Geofencing Pill (4 State + Tombol Refresh GPS) -->
+                <div class="p-3 rounded-2xl flex items-start justify-between gap-2 text-xs border transition-colors"
+                     :class="{
+                         'bg-sky-50 text-sky-900 border-sky-200': gpsStatus.state === 'loading',
+                         'bg-emerald-50 text-emerald-900 border-emerald-200': gpsStatus.state === 'valid',
+                         'bg-amber-50 text-amber-900 border-amber-200': gpsStatus.state === 'warning',
+                         'bg-rose-50 text-rose-900 border-rose-200': gpsStatus.state === 'error'
+                     }">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <span x-show="gpsStatus.state === 'loading'" class="shrink-0 mt-0.5 text-sky-600">
+                            <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                        </span>
+                        <span x-show="gpsStatus.state === 'valid'" class="shrink-0 mt-0.5 text-emerald-600">
+                            <i data-lucide="map-pin" class="w-4 h-4"></i>
+                        </span>
+                        <span x-show="gpsStatus.state === 'warning' || gpsStatus.state === 'error'" class="shrink-0 mt-0.5"
+                              :class="gpsStatus.state === 'warning' ? 'text-amber-600' : 'text-rose-600'">
+                            <i data-lucide="alert-circle" class="w-4 h-4"></i>
+                        </span>
+                        <div class="leading-tight min-w-0">
+                            <div class="font-bold" x-text="gpsStatus.title">Mencari Lokasi GPS...</div>
+                            <div class="text-[11px] opacity-85 mt-0.5 break-words" x-text="gpsStatus.message"></div>
+                        </div>
                     </div>
+
+                    <button type="button" @click="startGpsWatch(true)"
+                            class="shrink-0 px-2.5 py-1.5 rounded-xl bg-white/80 hover:bg-white text-[10px] font-bold border border-black/10 shadow-2xs active:scale-95 transition-all">
+                        Refresh GPS
+                    </button>
                 </div>
 
                 <!-- Kamera Viewfinder Container -->
-                <div class="relative w-full aspect-[3/4] bg-slate-900 rounded-3xl overflow-hidden shadow-inner flex items-center justify-center">
+                <div class="relative w-full max-w-[280px] mx-auto aspect-[3/4] max-h-[45dvh] bg-slate-900 rounded-3xl overflow-hidden shadow-inner flex items-center justify-center">
                     
-                    <!-- Video Stream WebRTC -->
+                    <!-- Video Stream WebRTC (Orientasi normal tanpa mirror) -->
                     <video x-ref="videoElement" autoplay playsinline muted class="w-full h-full object-cover" x-show="cameraStreamActive && !capturedPhotoBlob"></video>
 
                     <!-- Preview Foto yang Sudah Dijepret -->
                     <img x-show="capturedPhotoBlob" :src="capturedPhotoBlob" class="w-full h-full object-cover" alt="Selfie Preview">
 
-                    <!-- Panduan Oval Wajah (Identik Flutter SIROM photo_capture_screen) -->
-                    <div x-show="cameraStreamActive && !capturedPhotoBlob" class="absolute inset-x-8 inset-y-10 border-2 border-dashed border-emerald-400/80 rounded-[50%] pointer-events-none flex items-center justify-center">
+                    <!-- Panduan Oval Wajah -->
+                    <div x-show="cameraStreamActive && !capturedPhotoBlob" class="absolute inset-x-8 inset-y-8 border-2 border-dashed border-emerald-400/80 rounded-[50%] pointer-events-none flex items-center justify-center">
                         <span class="text-[10px] font-bold text-white/80 bg-slate-950/40 px-2 py-0.5 rounded-full">Posisikan Wajah</span>
                     </div>
 
-                    <!-- Placeholder Jika Kamera Belum Aktif -->
-                    <div x-show="!cameraStreamActive && !capturedPhotoBlob" class="text-center p-4 text-white space-y-2">
-                        <i data-lucide="camera" class="w-10 h-10 mx-auto text-slate-500 animate-pulse"></i>
-                        <div class="text-xs font-semibold text-slate-300">Menghubungkan Kamera...</div>
+                    <!-- Placeholder Jika Kamera Belum Aktif atau Native Mode -->
+                    <div x-show="!cameraStreamActive && !capturedPhotoBlob" class="text-center p-4 text-white space-y-2.5">
+                        <i data-lucide="camera" class="w-9 h-9 mx-auto text-slate-400"></i>
+                        <div class="text-xs font-semibold text-slate-200" x-text="cameraStatusMessage">Menghubungkan Kamera...</div>
+                        <label class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer active:scale-95 transition-all">
+                            <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
+                            <span>Buka Kamera iPhone</span>
+                            <input type="file" accept="image/*" capture="user" class="hidden" @change="handleNativeCameraCapture($event)">
+                        </label>
                     </div>
 
-                    <!-- Canvas Rahasia untuk Snapshot Foto -->
+                    <!-- Info ukuran file terkompresi -->
+                    <div x-show="capturedPhotoBlob && capturedPhotoSizeLabel" class="absolute bottom-2 right-2 px-2 py-0.5 rounded-full bg-slate-950/60 text-white text-[10px] font-semibold backdrop-blur-xs" x-text="capturedPhotoSizeLabel"></div>
+
+                    <!-- Canvas Rahasia untuk Snapshot & Kompresi Foto -->
                     <canvas x-ref="canvasElement" class="hidden"></canvas>
                 </div>
 
-                <!-- Fallback Input Kamera iPhone (Jika WebRTC tidak diizinkan di Safari) -->
+                <!-- Fallback Input Kamera Native iPhone -->
                 <div class="text-center">
-                    <label class="cursor-pointer text-xs font-bold text-primary-600 hover:text-primary-700 flex items-center justify-center gap-1.5 py-1">
+                    <label class="cursor-pointer text-xs font-bold text-primary-600 hover:text-primary-700 inline-flex items-center justify-center gap-1.5 py-1">
                         <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
-                        <span>Atau gunakan Kamera Native iPhone</span>
+                        <span>Gunakan Kamera Native iPhone</span>
                         <input type="file" accept="image/*" capture="user" class="hidden" @change="handleNativeCameraCapture($event)">
                     </label>
                 </div>
             </div>
 
             <!-- Footer: Tombol Aksi Jepret & Kirim -->
-            <div class="p-4 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
+            <div class="p-4 bg-slate-50 border-t border-slate-100 flex items-center gap-2 shrink-0">
                 <template x-if="!capturedPhotoBlob">
-                    <button @click="snapPhoto()" :disabled="!cameraStreamActive" class="w-full py-3 rounded-2xl bg-primary-600 hover:bg-primary-700 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all disabled:opacity-50 shadow-md">
+                    <button @click="snapPhoto()" :disabled="!cameraStreamActive || processingPhoto" class="w-full py-3 rounded-2xl bg-primary-600 hover:bg-primary-700 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all disabled:opacity-50 shadow-md">
                         <i data-lucide="camera" class="w-4 h-4"></i>
-                        <span>Ambil Foto Selfie</span>
+                        <span x-text="processingPhoto ? 'Memproses Foto...' : 'Ambil Foto Selfie'"></span>
                     </button>
                 </template>
 
                 <template x-if="capturedPhotoBlob">
                     <div class="flex items-center gap-2 w-full">
-                        <button @click="retakePhoto()" class="py-3 px-4 rounded-2xl bg-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-300 active:scale-95 transition-all">
+                        <button @click="retakePhoto()" :disabled="submittingAbsen" class="py-3 px-4 rounded-2xl bg-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-300 active:scale-95 transition-all disabled:opacity-50">
                             Foto Ulang
                         </button>
-                        <button @click="submitAbsensi()" :disabled="submittingAbsen || !gpsStatus.in_radius" class="flex-1 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs hover:from-emerald-700 hover:to-teal-700 active:scale-95 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50">
-                            <span x-text="submittingAbsen ? 'Mengirim Data...' : 'Kirim Presensi Sekarang'"></span>
+                        <button @click="submitAbsensi()" :disabled="submittingAbsen || processingPhoto || !capturedPhotoFile || gpsStatus.state !== 'valid'" class="flex-1 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs hover:from-emerald-700 hover:to-teal-700 active:scale-95 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50">
+                            <span x-text="submittingAbsen ? 'Mengirim Presensi...' : (processingPhoto ? 'Mengompres Foto...' : 'Kirim Presensi Sekarang')"></span>
                             <i data-lucide="send" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -735,7 +777,7 @@
     <div x-show="showRosterDetailModal" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/70 backdrop-blur-xs">
         <div class="bg-white rounded-t-[32px] sm:rounded-3xl w-full max-w-md sm:max-w-sm p-5 space-y-4 shadow-2xl pb-safe sm:pb-5">
             <div class="flex items-center justify-between pb-2 border-b border-slate-100">
-                <h3 class="text-sm font-black text-slate-900" x-text="'Detail Jadwal Tanggal ' + (selectedRosterDay?.tanggal || '')"></h3>
+                <h3 class="text-sm font-black text-slate-900" x-text="formatRosterDateTitle(selectedRosterDay?.tanggal)"></h3>
                 <button @click="showRosterDetailModal = false" class="text-slate-400 hover:text-slate-600">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
@@ -769,6 +811,19 @@
                             <span class="font-bold" x-text="selectedRosterDay.absen_pulang || 'Belum'"></span>
                         </div>
                     </div>
+
+                    <template x-if="selectedRosterDay.sesi2">
+                        <div class="p-3 rounded-2xl bg-purple-50 border border-purple-100 space-y-2">
+                            <div class="flex items-center justify-between text-purple-900">
+                                <span class="font-bold">Shift 2: <span x-text="selectedRosterDay.sesi2.nama_shift || '-'"></span></span>
+                                <span class="text-[11px] font-semibold" x-text="(selectedRosterDay.sesi2.jam_masuk || '-') + ' - ' + (selectedRosterDay.sesi2.jam_keluar || '-')"></span>
+                            </div>
+                            <div class="text-[11px] text-purple-700 flex items-center justify-between">
+                                <span x-text="'Masuk: ' + (selectedRosterDay.sesi2.absen_masuk || 'Belum')"></span>
+                                <span x-text="'Pulang: ' + (selectedRosterDay.sesi2.absen_pulang || 'Belum')"></span>
+                            </div>
+                        </div>
+                    </template>
                 </div>
             </template>
         </div>
@@ -781,10 +836,15 @@
         <div class="bg-white rounded-t-[32px] sm:rounded-3xl w-full max-w-md sm:max-w-sm p-5 space-y-4 shadow-2xl pb-safe sm:pb-5">
             <div class="flex items-center justify-between pb-2 border-b border-slate-100">
                 <h3 class="text-sm font-black text-slate-900">Ajukan Lembur Ekstensi</h3>
-                <button @click="showEkstensiModal = false" class="text-slate-400"><i data-lucide="x" class="w-5 h-5"></i></button>
+                <button @click="showEkstensiModal = false; stopGpsWatch()" class="text-slate-400"><i data-lucide="x" class="w-5 h-5"></i></button>
             </div>
 
             <div class="space-y-3 text-xs">
+                <div class="px-3 py-2 rounded-xl text-[11px] flex items-center justify-between border"
+                     :class="gpsStatus.state === 'valid' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-slate-50 text-slate-600 border-slate-200'">
+                    <span class="truncate pr-2" x-text="gpsStatus.message"></span>
+                    <button type="button" @click="startGpsWatch(true)" class="font-bold text-primary-600 shrink-0">Refresh</button>
+                </div>
                 <div>
                     <label class="block font-bold text-slate-700 mb-1">Durasi Lembur (Menit)</label>
                     <select x-model="formEkstensi.durasi_menit" class="w-full p-3 rounded-2xl border border-slate-200 bg-white font-medium">
@@ -819,10 +879,15 @@
         <div class="bg-white rounded-t-[32px] sm:rounded-3xl w-full max-w-md sm:max-w-sm p-5 space-y-4 shadow-2xl pb-safe sm:pb-5">
             <div class="flex items-center justify-between pb-2 border-b border-slate-100">
                 <h3 class="text-sm font-black text-slate-900" x-text="isOnCallClockOut ? 'Akhiri Sesi On-Call' : 'Mulai On-Call Darurat'"></h3>
-                <button @click="showOnCallModal = false" class="text-slate-400"><i data-lucide="x" class="w-5 h-5"></i></button>
+                <button @click="showOnCallModal = false; stopGpsWatch()" class="text-slate-400"><i data-lucide="x" class="w-5 h-5"></i></button>
             </div>
 
             <div class="space-y-3 text-xs">
+                <div class="px-3 py-2 rounded-xl text-[11px] flex items-center justify-between border"
+                     :class="gpsStatus.state === 'valid' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-slate-50 text-slate-600 border-slate-200'">
+                    <span class="truncate pr-2" x-text="gpsStatus.message"></span>
+                    <button type="button" @click="startGpsWatch(true)" class="font-bold text-primary-600 shrink-0">Refresh</button>
+                </div>
                 <div>
                     <label class="block font-bold text-slate-700 mb-1">Keterangan Panggilan Darurat</label>
                     <textarea x-model="formOnCall.keterangan" rows="3" placeholder="Contoh: Operasi Cito, IGD overload, dll..." class="w-full p-3 rounded-2xl border border-slate-200 font-medium"></textarea>
@@ -904,10 +969,42 @@
         </div>
     </div>
 
+    <!-- =================================================================== -->
+    <!-- MODAL 7: UBAH FOTO PROFIL -->
+    <!-- =================================================================== -->
+    <div x-show="showUploadFotoModal" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/70 backdrop-blur-xs">
+        <div class="bg-white rounded-t-[32px] sm:rounded-3xl w-full max-w-md sm:max-w-sm p-5 space-y-4 shadow-2xl pb-safe sm:pb-5">
+            <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+                <h3 class="text-sm font-black text-slate-900">Ubah Foto Profil</h3>
+                <button @click="showUploadFotoModal = false" class="text-slate-400"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+
+            <div class="space-y-3 text-xs">
+                <div class="text-center" x-show="fotoProfilPreview">
+                    <img :src="fotoProfilPreview" class="w-24 h-24 rounded-full object-cover mx-auto border-4 border-emerald-200 shadow-sm" alt="Preview Foto Profil">
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1.5">Pilih Foto atau Ambil Selfie</label>
+                    <input type="file" accept="image/*" @change="handleUploadFotoSelect($event)" class="w-full text-xs text-slate-500 file:mr-2 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-700">
+                </div>
+
+                <button @click="submitUploadFoto()" :disabled="submittingFotoProfil || !fotoProfilFile" class="w-full py-3.5 rounded-2xl bg-primary-600 text-white font-bold hover:bg-primary-700 active:scale-95 transition-all shadow-md disabled:opacity-50">
+                    <span x-text="submittingFotoProfil ? 'Mengunggah Foto...' : 'Simpan Foto Profil'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification Global -->
     <div x-show="toast.show" x-cloak x-transition class="fixed top-5 inset-x-4 max-w-xs mx-auto z-50 p-3.5 rounded-2xl text-white text-xs font-bold shadow-xl flex items-center gap-2.5"
          :class="toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'">
-        <i :data-lucide="toast.type === 'success' ? 'check-circle' : 'alert-circle'" class="w-4 h-4 shrink-0"></i>
+        <span x-show="toast.type === 'success'" class="shrink-0">
+            <i data-lucide="check-circle" class="w-4 h-4"></i>
+        </span>
+        <span x-show="toast.type !== 'success'" class="shrink-0">
+            <i data-lucide="alert-circle" class="w-4 h-4"></i>
+        </span>
         <span x-text="toast.message" class="leading-tight"></span>
     </div>
 </div>
@@ -920,18 +1017,20 @@ function siroMobileApp() {
         currentTab: 'beranda',
         subTabLembur: 0,
         tabValidasi: 'lembur',
-        
+
         // Live Clock State
         liveTime: '00:00:00',
         liveDate: '',
         greetingText: 'Selamat Datang',
 
-        // Data State
+        // Data State + Lazy-loading flags
         todayData: {},
         rosterDays: [],
+        rosterLeadingBlanks: [],
         rosterMonth: new Date().getMonth() + 1,
         rosterYear: new Date().getFullYear(),
         loadingRoster: false,
+        rosterLoaded: false,
         selectedRosterDay: null,
         showRosterDetailModal: false,
 
@@ -939,6 +1038,7 @@ function siroMobileApp() {
         riwayatLembur: [],
         riwayatAmbilJam: [],
         loadingLembur: false,
+        lemburLoaded: false,
         showEkstensiModal: false,
         formEkstensi: { durasi_menit: 60, keterangan: '', foto: null },
         submittingEkstensi: false,
@@ -956,10 +1056,15 @@ function siroMobileApp() {
         validasiLemburList: [],
         validasiAmbilList: [],
         loadingValidasi: false,
+        validasiLoaded: false,
 
         // Profil & Password State
+        profilePhotoUrl: @json($userFoto),
         showUbahPasswordModal: false,
         showUploadFotoModal: false,
+        fotoProfilPreview: null,
+        fotoProfilFile: null,
+        submittingFotoProfil: false,
         formPassword: { current_password: '', new_password: '', new_password_confirmation: '' },
 
         // Kamera & Absensi State
@@ -967,11 +1072,20 @@ function siroMobileApp() {
         absenType: 'masuk',
         cameraStream: null,
         cameraStreamActive: false,
+        cameraStatusMessage: 'Menghubungkan Kamera...',
+        processingPhoto: false,
         capturedPhotoBlob: null,
         capturedPhotoFile: null,
+        capturedPhotoSizeLabel: '',
         submittingAbsen: false,
-        gpsCoords: { latitude: 0, longitude: 0, accuracy: 0 },
-        gpsStatus: { in_radius: false, message: 'Mendeteksi GPS...' },
+
+        // GPS State (Adaptive iPhone Safari)
+        gpsCoords: { latitude: 0, longitude: 0, accuracy: 0, updatedAt: 0 },
+        gpsStatus: { state: 'loading', title: 'Mencari Lokasi GPS...', message: 'Mengambil koordinat...', in_radius: false },
+        gpsWatchId: null,
+        gpsFallbackTimer: null,
+        gpsFallbackTriggered: false,
+        lastLocationCheckAt: 0,
 
         // Toast
         toast: { show: false, message: '', type: 'success' },
@@ -984,11 +1098,37 @@ function siroMobileApp() {
         initApp() {
             this.startLiveClock();
             this.fetchTodayStatus();
-            this.fetchRoster();
-            this.fetchLemburData();
-            @if($canValidasi)
-            this.fetchValidasiList();
-            @endif
+            this.prewarmGpsIfPermitted();
+
+            // Refresh CSRF & status saat PWA/Safari dibuka kembali dari background
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    this.refreshCsrfToken();
+                    if (this.currentTab === 'beranda') {
+                        this.fetchTodayStatus();
+                    }
+                }
+            });
+            window.addEventListener('pageshow', (e) => {
+                if (e.persisted) {
+                    this.refreshCsrfToken();
+                    this.fetchTodayStatus();
+                }
+            });
+        },
+
+        switchTab(tab) {
+            this.currentTab = tab;
+            if (tab === 'jadwal' && !this.rosterLoaded) {
+                this.fetchRoster();
+            } else if (tab === 'lembur' && !this.lemburLoaded) {
+                this.fetchLemburData();
+            } else if (tab === 'validasi' && !this.validasiLoaded) {
+                @if($canValidasi)
+                this.fetchValidasiList();
+                @endif
+            }
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
         },
 
         startLiveClock() {
@@ -1015,37 +1155,148 @@ function siroMobileApp() {
             this.toast.message = msg;
             this.toast.type = type;
             this.toast.show = true;
-            setTimeout(() => this.toast.show = false, 3500);
-            if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
+            setTimeout(() => this.toast.show = false, 4000);
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
+        },
+
+        updateCsrfMeta(token) {
+            if (!token) return;
+            const meta = document.querySelector('meta[name="csrf-token"]');
+            if (meta) meta.setAttribute('content', token);
+        },
+
+        async refreshCsrfToken() {
+            try {
+                const res = await fetch('{{ route('app.api.csrf-token', [], false) }}', {
+                    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    cache: 'no-store'
+                });
+                if (res.ok) {
+                    const json = await res.json();
+                    if (json.csrf_token) this.updateCsrfMeta(json.csrf_token);
+                }
+            } catch (_) {}
+        },
+
+        async safeFetch(url, options = {}, timeoutMs = 25000, retriedCsrf = false) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            const meta = document.querySelector('meta[name="csrf-token"]');
+            const token = meta ? meta.getAttribute('content') : '';
+
+            const headers = Object.assign(
+                {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': token
+                },
+                options.headers || {}
+            );
+
+            try {
+                const res = await fetch(url, Object.assign({}, options, {
+                    headers,
+                    signal: controller.signal,
+                    credentials: 'same-origin'
+                }));
+                clearTimeout(timer);
+
+                // Otomatis refresh CSRF token jika PWA Safari bangun dari tidur (419)
+                if (res.status === 419 && !retriedCsrf) {
+                    await this.refreshCsrfToken();
+                    return this.safeFetch(url, options, timeoutMs, true);
+                }
+
+                if (res.status === 401) {
+                    this.showToast('Sesi login telah berakhir. Silakan masuk ulang.', 'error');
+                    setTimeout(() => { window.location.href = '{{ route('app.login', [], false) }}'; }, 1200);
+                    return { success: false, message: 'Sesi berakhir. Mengalihkan ke login...' };
+                }
+
+                if (res.status === 413) {
+                    return { success: false, message: 'Ukuran foto terlalu besar. Silakan foto ulang.' };
+                }
+
+                const text = await res.text();
+                let json = null;
+                try {
+                    json = text ? JSON.parse(text) : {};
+                } catch (_) {
+                    return {
+                        success: false,
+                        message: `Server bermasalah (HTTP ${res.status}). Silakan coba beberapa saat lagi.`
+                    };
+                }
+
+                if (!res.ok && json && json.success === undefined) {
+                    let msg = json.message || `Terjadi kesalahan (HTTP ${res.status}).`;
+                    if (json.errors) {
+                        const firstKey = Object.keys(json.errors)[0];
+                        if (firstKey && json.errors[firstKey]?.[0]) {
+                            msg = json.errors[firstKey][0];
+                        }
+                    }
+                    return { success: false, message: msg, data: json.data };
+                }
+
+                return json;
+            } catch (err) {
+                clearTimeout(timer);
+                if (err.name === 'AbortError') {
+                    return {
+                        success: false,
+                        message: 'Koneksi lambat / waktu habis. Pastikan sinyal Wi-Fi atau seluler stabil lalu coba lagi.'
+                    };
+                }
+                return {
+                    success: false,
+                    message: 'Koneksi ke server terganggu. Periksa jaringan internet Anda.'
+                };
+            }
         },
 
         async fetchTodayStatus() {
-            try {
-                const res = await fetch('{{ route('app.api.today-status') }}');
-                const json = await res.json();
-                if (json.success) {
-                    this.todayData = json.data;
-                    if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
-                }
-            } catch (e) {
-                console.error(e);
+            const json = await this.safeFetch('{{ route('app.api.today-status', [], false) }}', { cache: 'no-store' }, 15000);
+            if (json && json.csrf_token) this.updateCsrfMeta(json.csrf_token);
+            if (json && json.success) {
+                this.todayData = json.data;
+                if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
             }
         },
 
         async fetchRoster() {
             this.loadingRoster = true;
-            try {
-                const res = await fetch(`{{ route('app.api.jadwal-dinas') }}?bulan=${this.rosterMonth}&tahun=${this.rosterYear}`);
-                const json = await res.json();
-                if (json.success) {
-                    this.rosterDays = json.data.hari || [];
+            const firstDayIdx = new Date(this.rosterYear, this.rosterMonth - 1, 1).getDay();
+            this.rosterLeadingBlanks = Array.from({ length: firstDayIdx }, (_, i) => i);
+
+            const json = await this.safeFetch(`{{ route('app.api.jadwal-dinas', [], false) }}?bulan=${this.rosterMonth}&tahun=${this.rosterYear}`);
+            if (json && json.success) {
+                const serverStartIdx = json.data.hari_awal_minggu;
+                if (typeof serverStartIdx === 'number') {
+                    this.rosterLeadingBlanks = Array.from({ length: serverStartIdx }, (_, i) => i);
                 }
-            } catch (e) {
-                console.error(e);
-            } finally {
-                this.loadingRoster = false;
-                if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
+                this.rosterDays = json.data.hari || [];
+                this.rosterLoaded = true;
             }
+            this.loadingRoster = false;
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
+        },
+
+        isTodayRoster(day) {
+            const now = new Date();
+            return now.getFullYear() === this.rosterYear && (now.getMonth() + 1) === this.rosterMonth && now.getDate() === day;
+        },
+
+        isSundayRoster(day) {
+            if (!day) return false;
+            return new Date(this.rosterYear, this.rosterMonth - 1, day).getDay() === 0;
+        },
+
+        formatRosterDateTitle(day) {
+            if (!day) return 'Detail Jadwal';
+            const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+            const d = new Date(this.rosterYear, this.rosterMonth - 1, day);
+            return `${days[d.getDay()]}, ${day} ${this.monthNames[this.rosterMonth - 1]} ${this.rosterYear}`;
         },
 
         changeMonth(delta) {
@@ -1062,116 +1313,328 @@ function siroMobileApp() {
 
         async fetchLemburData() {
             this.loadingLembur = true;
-            try {
-                const res = await fetch('{{ route('app.api.lembur-data') }}');
-                const json = await res.json();
-                if (json.success) {
-                    this.riwayatLembur = json.data.riwayat_lembur || [];
-                    this.riwayatAmbilJam = json.data.riwayat_ambil_jam || [];
-                }
-            } catch (e) {
-                console.error(e);
-            } finally {
-                this.loadingLembur = false;
-                if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
+            const json = await this.safeFetch('{{ route('app.api.lembur-data', [], false) }}');
+            if (json && json.success) {
+                this.riwayatLembur = json.data.riwayat_lembur || [];
+                this.riwayatAmbilJam = json.data.riwayat_ambil_jam || [];
+                this.lemburLoaded = true;
             }
+            this.loadingLembur = false;
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
         },
 
         async fetchValidasiList() {
             this.loadingValidasi = true;
+            const json = await this.safeFetch('{{ route('app.api.validasi-list', [], false) }}');
+            if (json && json.success) {
+                this.validasiLemburList = json.data.lembur || [];
+                this.validasiAmbilList = json.data.ambil_jam || [];
+                this.validasiLoaded = true;
+            }
+            this.loadingValidasi = false;
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
+        },
+
+        // ===================================================================
+        // GPS ADAPTIF KHUSUS IPHONE (HIGH ACCURACY + INDOOR WIFI FALLBACK)
+        // ===================================================================
+        async prewarmGpsIfPermitted() {
+            if (!navigator.geolocation || !navigator.permissions || !navigator.permissions.query) return;
             try {
-                const res = await fetch('{{ route('app.api.validasi-list') }}');
-                const json = await res.json();
-                if (json.success) {
-                    this.validasiLemburList = json.data.lembur || [];
-                    this.validasiAmbilList = json.data.ambil_jam || [];
+                const perm = await navigator.permissions.query({ name: 'geolocation' });
+                if (perm.state === 'granted') {
+                    navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                            if (pos.coords.latitude !== 0 || pos.coords.longitude !== 0) {
+                                this.gpsCoords = {
+                                    latitude: pos.coords.latitude,
+                                    longitude: pos.coords.longitude,
+                                    accuracy: pos.coords.accuracy,
+                                    updatedAt: Date.now()
+                                };
+                            }
+                        },
+                        () => {},
+                        { enableHighAccuracy: false, maximumAge: 60000, timeout: 5000 }
+                    );
                 }
-            } catch (e) {
-                console.error(e);
-            } finally {
-                this.loadingValidasi = false;
-                if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
+            } catch (_) {}
+        },
+
+        stopGpsWatch() {
+            if (this.gpsWatchId !== null && navigator.geolocation) {
+                navigator.geolocation.clearWatch(this.gpsWatchId);
+                this.gpsWatchId = null;
+            }
+            if (this.gpsFallbackTimer) {
+                clearTimeout(this.gpsFallbackTimer);
+                this.gpsFallbackTimer = null;
+            }
+        },
+
+        startGpsWatch(forceRefresh = false) {
+            if (!navigator.geolocation) {
+                this.gpsStatus = {
+                    state: 'error',
+                    title: 'GPS Tidak Didukung',
+                    message: 'Browser ini tidak mendukung fitur lokasi GPS.',
+                    in_radius: false
+                };
+                return;
+            }
+
+            this.stopGpsWatch();
+            this.gpsFallbackTriggered = false;
+
+            if (forceRefresh) {
+                this.gpsCoords = { latitude: 0, longitude: 0, accuracy: 0, updatedAt: 0 };
+            }
+
+            // Jika ada cache GPS segar (< 15 detik & akurasi bagus), langsung cek jarak sambil tetap menyempurnakan GPS
+            const ageMs = Date.now() - (this.gpsCoords.updatedAt || 0);
+            if (!forceRefresh && ageMs < 15000 && (this.gpsCoords.latitude !== 0 || this.gpsCoords.longitude !== 0)) {
+                this.verifyLocationWithBackend(this.gpsCoords);
+            } else {
+                this.gpsStatus = {
+                    state: 'loading',
+                    title: 'Mencari Lokasi iPhone...',
+                    message: 'Mengambil koordinat GPS / Wi-Fi sekitar RS...',
+                    in_radius: false
+                };
+            }
+
+            // Tahap 1: Watch High Accuracy (berjalan terus menyempurnakan sinyal)
+            this.gpsWatchId = navigator.geolocation.watchPosition(
+                (pos) => this.handleGpsPosition(pos),
+                (err) => this.handleGpsError(err),
+                { enableHighAccuracy: true, maximumAge: 15000, timeout: 15000 }
+            );
+
+            // Tahap 2: Fallback Indoor (jika dalam 3 detik satelit GPS belum lock, ambil via Wi-Fi/Seluler iPhone)
+            this.gpsFallbackTimer = setTimeout(() => {
+                if ((Date.now() - (this.gpsCoords.updatedAt || 0)) > 15000 || this.gpsCoords.latitude === 0) {
+                    this.runStandardAccuracyFallback();
+                }
+            }, 3000);
+        },
+
+        runStandardAccuracyFallback() {
+            if (this.gpsFallbackTriggered || !navigator.geolocation) return;
+            this.gpsFallbackTriggered = true;
+
+            navigator.geolocation.getCurrentPosition(
+                (pos) => this.handleGpsPosition(pos),
+                (err) => {
+                    if (this.gpsCoords.latitude === 0 && this.gpsCoords.longitude === 0) {
+                        this.handleGpsError(err, true);
+                    }
+                },
+                { enableHighAccuracy: false, maximumAge: 60000, timeout: 10000 }
+            );
+        },
+
+        handleGpsPosition(pos) {
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            const acc = pos.coords.accuracy || 50;
+
+            if (lat === 0 && lng === 0) return;
+
+            if (this.gpsFallbackTimer) {
+                clearTimeout(this.gpsFallbackTimer);
+                this.gpsFallbackTimer = null;
+            }
+
+            // Jangan timpa sinyal akurat baru (<15 detik) dengan sinyal jauh lebih buruk
+            const prevAge = Date.now() - (this.gpsCoords.updatedAt || 0);
+            if (prevAge < 15000 && this.gpsCoords.accuracy > 0 && acc > this.gpsCoords.accuracy * 1.5 && this.gpsCoords.accuracy <= 60) {
+                return;
+            }
+
+            this.gpsCoords = {
+                latitude: lat,
+                longitude: lng,
+                accuracy: acc,
+                updatedAt: Date.now()
+            };
+
+            // Throttle cek jarak ke backend agar tidak membanjiri server
+            const now = Date.now();
+            if (now - this.lastLocationCheckAt >= 1500 || this.gpsStatus.state === 'loading') {
+                this.lastLocationCheckAt = now;
+                this.verifyLocationWithBackend(this.gpsCoords);
+            }
+        },
+
+        handleGpsError(err, isFromFallback = false) {
+            if (err.code === 1) {
+                this.stopGpsWatch();
+                this.gpsStatus = {
+                    state: 'error',
+                    title: 'Izin Lokasi Ditolak',
+                    message: 'Di iPhone: buka Pengaturan > Privasi & Keamanan > Layanan Lokasi > Situs Web Safari > pilih "Saat Menggunakan App" & nyalakan Lokasi Tepat.',
+                    in_radius: false
+                };
+                return;
+            }
+
+            // Timeout (3) atau Unavailable (2) saat high-accuracy -> langsung coba mode standar Wi-Fi/Seluler
+            if (!isFromFallback && !this.gpsFallbackTriggered) {
+                this.runStandardAccuracyFallback();
+                return;
+            }
+
+            if (this.gpsCoords.latitude === 0 && this.gpsCoords.longitude === 0) {
+                this.gpsStatus = {
+                    state: 'error',
+                    title: 'Sinyal GPS Lemah',
+                    message: 'Lokasi belum terbaca di dalam ruangan. Mendekatlah ke jendela/pintu lalu ketuk "Refresh GPS".',
+                    in_radius: false
+                };
+            }
+        },
+
+        async verifyLocationWithBackend(coords) {
+            const json = await this.safeFetch('{{ route('app.api.check-location', [], false) }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                    accuracy: coords.accuracy
+                })
+            }, 10000);
+
+            if (!json) return;
+
+            if (json.accuracy_low) {
+                this.gpsStatus = {
+                    state: 'warning',
+                    title: 'Akurasi GPS Rendah',
+                    message: json.message,
+                    in_radius: false
+                };
+            } else if (json.in_radius) {
+                this.gpsStatus = {
+                    state: 'valid',
+                    title: 'Lokasi Valid (Dalam Radius RS)',
+                    message: json.message,
+                    in_radius: true
+                };
+            } else if (json.success === false) {
+                this.gpsStatus = {
+                    state: 'error',
+                    title: 'Gagal Memeriksa Lokasi',
+                    message: json.message || 'Coba ketuk Refresh GPS.',
+                    in_radius: false
+                };
+            } else {
+                this.gpsStatus = {
+                    state: 'warning',
+                    title: 'Di Luar Radius RS',
+                    message: json.message,
+                    in_radius: false
+                };
             }
         },
 
         // ===================================================================
-        // ALUR KAMERA & GPS PRESENSI
+        // KOMPRESI GAMBAR OTOMATIS (UBAH FOTO 10MB IPHONE JADI ~80KB JPEG)
+        // ===================================================================
+        async compressCanvasToJpeg(canvas, quality = 0.72) {
+            const dataUrl = canvas.toDataURL('image/jpeg', quality);
+            const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+            const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
+            const sizeKb = Math.max(1, Math.round(file.size / 1024));
+            return { dataUrl, file, sizeKb };
+        },
+
+        async compressImageFile(file, maxDim = 720, quality = 0.72) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                const objectUrl = URL.createObjectURL(file);
+
+                img.onload = async () => {
+                    try {
+                        let w = img.naturalWidth || img.width;
+                        let h = img.naturalHeight || img.height;
+                        if (w > maxDim || h > maxDim) {
+                            if (w >= h) {
+                                h = Math.round((h * maxDim) / w);
+                                w = maxDim;
+                            } else {
+                                w = Math.round((w * maxDim) / h);
+                                h = maxDim;
+                            }
+                        }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = w;
+                        canvas.height = h;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, w, h);
+
+                        const compressed = await this.compressCanvasToJpeg(canvas, quality);
+                        URL.revokeObjectURL(objectUrl);
+                        resolve(compressed);
+                    } catch (e) {
+                        URL.revokeObjectURL(objectUrl);
+                        reject(e);
+                    }
+                };
+
+                img.onerror = () => {
+                    URL.revokeObjectURL(objectUrl);
+                    reject(new Error('Format gambar tidak dapat diproses browser.'));
+                };
+
+                img.src = objectUrl;
+            });
+        },
+
+        // ===================================================================
+        // ALUR KAMERA & PRESENSI
         // ===================================================================
         openAbsensi(type) {
             this.absenType = type;
             this.capturedPhotoBlob = null;
             this.capturedPhotoFile = null;
+            this.capturedPhotoSizeLabel = '';
+            this.processingPhoto = false;
             this.showAbsenModal = true;
-            this.requestGPSLocation();
+
+            this.refreshCsrfToken();
+            this.startGpsWatch(false);
             this.initCameraStream();
-            if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
         },
 
         closeAbsenModal() {
             this.stopCameraStream();
+            this.stopGpsWatch();
             this.showAbsenModal = false;
-        },
-
-        requestGPSLocation() {
-            this.gpsStatus.message = 'Mendeteksi posisi GPS...';
-            if (!navigator.geolocation) {
-                this.gpsStatus = { in_radius: false, message: 'Browser tidak mendukung GPS Geolocation.' };
-                return;
-            }
-
-            navigator.geolocation.getCurrentPosition(
-                async (pos) => {
-                    this.gpsCoords = {
-                        latitude: pos.coords.latitude,
-                        longitude: pos.coords.longitude,
-                        accuracy: pos.coords.accuracy
-                    };
-                    
-                    // Cek jarak dengan backend
-                    try {
-                        const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-                        const res = await fetch('{{ route('app.api.check-location') }}', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': token },
-                            body: JSON.stringify(this.gpsCoords)
-                        });
-                        const json = await res.json();
-                        this.gpsStatus = {
-                            in_radius: json.in_radius,
-                            message: json.message
-                        };
-                    } catch (e) {
-                        this.gpsStatus = { in_radius: true, message: 'Koordinat GPS didapatkan.' };
-                    }
-                    if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
-                },
-                (err) => {
-                    this.gpsStatus = {
-                        in_radius: false,
-                        message: 'Izin GPS ditolak atau tidak aktif. Buka Pengaturan iPhone > Safari > Lokasi.'
-                    };
-                    if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
-                },
-                { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
-            );
         },
 
         async initCameraStream() {
             this.cameraStreamActive = false;
+            this.cameraStatusMessage = 'Menghubungkan Kamera...';
             try {
                 if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
                     this.cameraStream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } },
+                        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 800 } },
                         audio: false
                     });
                     if (this.$refs.videoElement) {
                         this.$refs.videoElement.srcObject = this.cameraStream;
+                        await this.$refs.videoElement.play().catch(() => {});
                         this.cameraStreamActive = true;
                     }
+                } else {
+                    this.cameraStatusMessage = 'Gunakan tombol Kamera iPhone di bawah.';
                 }
             } catch (err) {
                 console.warn('WebRTC Camera gagal atau diblokir:', err);
                 this.cameraStreamActive = false;
+                this.cameraStatusMessage = 'Ketuk tombol di bawah untuk membuka Kamera iPhone.';
             }
         },
 
@@ -1183,44 +1646,83 @@ function siroMobileApp() {
             this.cameraStreamActive = false;
         },
 
-        snapPhoto() {
+        async snapPhoto() {
             const video = this.$refs.videoElement;
             const canvas = this.$refs.canvasElement;
-            if (!video || !canvas) return;
+            if (!video || !canvas || !video.videoWidth) {
+                this.showToast('Kamera sedang bersiap, coba tekan lagi.', 'error');
+                return;
+            }
 
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 480;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            this.processingPhoto = true;
+            try {
+                const maxDim = 720;
+                let w = video.videoWidth;
+                let h = video.videoHeight;
+                if (w > maxDim || h > maxDim) {
+                    if (w >= h) {
+                        h = Math.round((h * maxDim) / w);
+                        w = maxDim;
+                    } else {
+                        w = Math.round((w * maxDim) / h);
+                        h = maxDim;
+                    }
+                }
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, w, h);
 
-            this.capturedPhotoBlob = canvas.toDataURL('image/jpeg', 0.85);
-
-            canvas.toBlob((blob) => {
-                this.capturedPhotoFile = new File([blob], `selfie_${Date.now()}.jpg`, { type: 'image/jpeg' });
-            }, 'image/jpeg', 0.85);
-
-            this.stopCameraStream();
-            if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
+                const result = await this.compressCanvasToJpeg(canvas, 0.72);
+                this.capturedPhotoBlob = result.dataUrl;
+                this.capturedPhotoFile = result.file;
+                this.capturedPhotoSizeLabel = `${result.sizeKb} KB`;
+                this.stopCameraStream();
+            } catch (e) {
+                this.showToast('Gagal mengambil foto kamera.', 'error');
+            } finally {
+                this.processingPhoto = false;
+                if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
+            }
         },
 
         retakePhoto() {
             this.capturedPhotoBlob = null;
             this.capturedPhotoFile = null;
+            this.capturedPhotoSizeLabel = '';
             this.initCameraStream();
         },
 
-        handleNativeCameraCapture(e) {
-            const file = e.target.files[0];
-            if (!file) return;
+        async handleNativeCameraCapture(e) {
+            const rawFile = e.target.files[0];
+            e.target.value = '';
+            if (!rawFile) return;
 
-            this.capturedPhotoFile = file;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                this.capturedPhotoBlob = event.target.result;
+            this.processingPhoto = true;
+            try {
+                const result = await this.compressImageFile(rawFile, 720, 0.72);
+                this.capturedPhotoBlob = result.dataUrl;
+                this.capturedPhotoFile = result.file;
+                this.capturedPhotoSizeLabel = `${result.sizeKb} KB`;
                 this.stopCameraStream();
-                if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
-            };
-            reader.readAsDataURL(file);
+            } catch (_) {
+                // Fallback bila browser tidak bisa decode lewat canvas (misal codec tertentu)
+                if (rawFile.size <= 4 * 1024 * 1024) {
+                    this.capturedPhotoFile = rawFile;
+                    this.capturedPhotoSizeLabel = `${Math.round(rawFile.size / 1024)} KB`;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        this.capturedPhotoBlob = ev.target.result;
+                        this.stopCameraStream();
+                    };
+                    reader.readAsDataURL(rawFile);
+                } else {
+                    this.showToast('Ukuran foto terlalu besar. Gunakan resolusi standar kamera.', 'error');
+                }
+            } finally {
+                this.processingPhoto = false;
+                if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
+            }
         },
 
         async submitAbsensi() {
@@ -1228,8 +1730,8 @@ function siroMobileApp() {
                 this.showToast('Silakan ambil foto selfie terlebih dahulu.', 'error');
                 return;
             }
-            if (!this.gpsStatus.in_radius) {
-                this.showToast('Posisi Anda di luar radius RS.', 'error');
+            if (this.gpsStatus.state !== 'valid') {
+                this.showToast(this.gpsStatus.message || 'Pastikan lokasi GPS valid di dalam radius RS.', 'error');
                 return;
             }
 
@@ -1237,32 +1739,23 @@ function siroMobileApp() {
             const formData = new FormData();
             formData.append('latitude', this.gpsCoords.latitude);
             formData.append('longitude', this.gpsCoords.longitude);
-            formData.append('accuracy', this.gpsCoords.accuracy || 10);
+            formData.append('accuracy', Math.round(this.gpsCoords.accuracy || 15));
             formData.append('foto', this.capturedPhotoFile);
 
-            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-            const url = this.absenType === 'masuk' ? '{{ route('app.api.absensi.masuk') }}' : '{{ route('app.api.absensi.pulang') }}';
+            const url = this.absenType === 'masuk'
+                ? '{{ route('app.api.absensi.masuk', [], false) }}'
+                : '{{ route('app.api.absensi.pulang', [], false) }}';
 
-            try {
-                const res = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'X-CSRF-TOKEN': token, 'Accept': 'application/json' },
-                    body: formData
-                });
-                const json = await res.json();
+            const json = await this.safeFetch(url, { method: 'POST', body: formData }, 25000);
+            this.submittingAbsen = false;
 
-                if (json.success) {
-                    this.showToast(json.message || 'Presensi berhasil dicatat!');
-                    this.closeAbsenModal();
-                    await this.fetchTodayStatus();
-                    await this.fetchRoster();
-                } else {
-                    this.showToast(json.message || 'Gagal mengirim presensi.', 'error');
-                }
-            } catch (err) {
-                this.showToast('Terjadi kesalahan jaringan.', 'error');
-            } finally {
-                this.submittingAbsen = false;
+            if (json && json.success) {
+                this.showToast(json.message || 'Presensi berhasil dicatat!');
+                this.closeAbsenModal();
+                this.rosterLoaded = false;
+                this.fetchTodayStatus();
+            } else {
+                this.showToast((json && json.message) || 'Gagal mengirim presensi.', 'error');
             }
         },
 
@@ -1272,16 +1765,29 @@ function siroMobileApp() {
         openEkstensiModal() {
             this.formEkstensi = { durasi_menit: 60, keterangan: '', foto: null };
             this.showEkstensiModal = true;
-            if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
+            this.startGpsWatch(false);
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
         },
 
-        handleEkstensiFoto(e) {
-            this.formEkstensi.foto = e.target.files[0];
+        async handleEkstensiFoto(e) {
+            const rawFile = e.target.files[0];
+            if (!rawFile) return;
+            try {
+                const compressed = await this.compressImageFile(rawFile, 720, 0.72);
+                this.formEkstensi.foto = compressed.file;
+            } catch (_) {
+                this.formEkstensi.foto = rawFile;
+            }
         },
 
         async submitEkstensi() {
             if (!this.formEkstensi.keterangan || !this.formEkstensi.foto) {
                 this.showToast('Keterangan dan foto bukti wajib diisi.', 'error');
+                return;
+            }
+            if (this.gpsCoords.latitude === 0 && this.gpsCoords.longitude === 0) {
+                this.showToast('Menunggu koordinat GPS iPhone. Pastikan izin lokasi aktif.', 'error');
+                this.startGpsWatch(true);
                 return;
             }
 
@@ -1290,28 +1796,23 @@ function siroMobileApp() {
             formData.append('durasi_menit', this.formEkstensi.durasi_menit);
             formData.append('keterangan', this.formEkstensi.keterangan);
             formData.append('foto_masuk', this.formEkstensi.foto);
-            formData.append('latitude', this.gpsCoords.latitude || -0.947);
-            formData.append('longitude', this.gpsCoords.longitude || 100.417);
+            formData.append('latitude', this.gpsCoords.latitude);
+            formData.append('longitude', this.gpsCoords.longitude);
+            formData.append('accuracy', Math.round(this.gpsCoords.accuracy || 15));
 
-            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-            try {
-                const res = await fetch('{{ route('app.api.lembur.ekstensi') }}', {
-                    method: 'POST',
-                    headers: { 'X-CSRF-TOKEN': token, 'Accept': 'application/json' },
-                    body: formData
-                });
-                const json = await res.json();
-                if (json.success) {
-                    this.showToast('Pengajuan lembur ekstensi berhasil dikirim!');
-                    this.showEkstensiModal = false;
-                    this.fetchLemburData();
-                } else {
-                    this.showToast(json.message || 'Gagal mengajukan lembur.', 'error');
-                }
-            } catch (e) {
-                this.showToast('Terjadi kesalahan jaringan.', 'error');
-            } finally {
-                this.submittingEkstensi = false;
+            const json = await this.safeFetch('{{ route('app.api.lembur.ekstensi', [], false) }}', {
+                method: 'POST',
+                body: formData
+            }, 25000);
+            this.submittingEkstensi = false;
+
+            if (json && json.success) {
+                this.showToast('Pengajuan lembur ekstensi berhasil dikirim!');
+                this.showEkstensiModal = false;
+                this.stopGpsWatch();
+                this.fetchLemburData();
+            } else {
+                this.showToast((json && json.message) || 'Gagal mengajukan lembur.', 'error');
             }
         },
 
@@ -1319,18 +1820,27 @@ function siroMobileApp() {
             this.isOnCallClockOut = false;
             this.formOnCall = { keterangan: '', foto: null };
             this.showOnCallModal = true;
-            if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
+            this.startGpsWatch(false);
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
         },
 
         openOnCallClockOut() {
             this.isOnCallClockOut = true;
             this.formOnCall = { keterangan: 'Selesai tugas On-Call', foto: null };
             this.showOnCallModal = true;
-            if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
+            this.startGpsWatch(false);
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
         },
 
-        handleOnCallFoto(e) {
-            this.formOnCall.foto = e.target.files[0];
+        async handleOnCallFoto(e) {
+            const rawFile = e.target.files[0];
+            if (!rawFile) return;
+            try {
+                const compressed = await this.compressImageFile(rawFile, 720, 0.72);
+                this.formOnCall.foto = compressed.file;
+            } catch (_) {
+                this.formOnCall.foto = rawFile;
+            }
         },
 
         async submitOnCall() {
@@ -1338,16 +1848,22 @@ function siroMobileApp() {
                 this.showToast('Keterangan dan foto bukti wajib diisi.', 'error');
                 return;
             }
+            if (this.gpsCoords.latitude === 0 && this.gpsCoords.longitude === 0) {
+                this.showToast('Menunggu koordinat GPS iPhone. Pastikan izin lokasi aktif.', 'error');
+                this.startGpsWatch(true);
+                return;
+            }
 
             this.submittingOnCall = true;
             const formData = new FormData();
             formData.append('keterangan', this.formOnCall.keterangan);
-            formData.append('latitude', this.gpsCoords.latitude || -0.947);
-            formData.append('longitude', this.gpsCoords.longitude || 100.417);
-            
+            formData.append('latitude', this.gpsCoords.latitude);
+            formData.append('longitude', this.gpsCoords.longitude);
+            formData.append('accuracy', Math.round(this.gpsCoords.accuracy || 15));
+
             const url = this.isOnCallClockOut
-                ? '{{ route('app.api.lembur.oncall-keluar') }}'
-                : '{{ route('app.api.lembur.oncall-masuk') }}';
+                ? '{{ route('app.api.lembur.oncall-keluar', [], false) }}'
+                : '{{ route('app.api.lembur.oncall-masuk', [], false) }}';
 
             if (this.isOnCallClockOut) {
                 formData.append('foto_keluar', this.formOnCall.foto);
@@ -1355,33 +1871,24 @@ function siroMobileApp() {
                 formData.append('foto_masuk', this.formOnCall.foto);
             }
 
-            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-            try {
-                const res = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'X-CSRF-TOKEN': token, 'Accept': 'application/json' },
-                    body: formData
-                });
-                const json = await res.json();
-                if (json.success) {
-                    this.showToast(json.message || 'Sesi On-Call berhasil diproses!');
-                    this.showOnCallModal = false;
-                    await this.fetchTodayStatus();
-                    await this.fetchLemburData();
-                } else {
-                    this.showToast(json.message || 'Gagal memproses On-Call.', 'error');
-                }
-            } catch (e) {
-                this.showToast('Terjadi kesalahan jaringan.', 'error');
-            } finally {
-                this.submittingOnCall = false;
+            const json = await this.safeFetch(url, { method: 'POST', body: formData }, 25000);
+            this.submittingOnCall = false;
+
+            if (json && json.success) {
+                this.showToast(json.message || 'Sesi On-Call berhasil diproses!');
+                this.showOnCallModal = false;
+                this.stopGpsWatch();
+                this.fetchTodayStatus();
+                this.fetchLemburData();
+            } else {
+                this.showToast((json && json.message) || 'Gagal memproses On-Call.', 'error');
             }
         },
 
         openAmbilJamModal() {
             this.formAmbilJam = { tanggal_rencana: '', durasi_menit: 60, alasan: '' };
             this.showAmbilJamModal = true;
-            if (window.lucide) setTimeout(() => lucide.createIcons(), 50);
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
         },
 
         async submitAmbilJam() {
@@ -1391,26 +1898,19 @@ function siroMobileApp() {
             }
 
             this.submittingAmbilJam = true;
-            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            const json = await this.safeFetch('{{ route('app.api.lembur.ambil-jam', [], false) }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.formAmbilJam)
+            });
+            this.submittingAmbilJam = false;
 
-            try {
-                const res = await fetch('{{ route('app.api.lembur.ambil-jam') }}', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': token, 'Accept': 'application/json' },
-                    body: JSON.stringify(this.formAmbilJam)
-                });
-                const json = await res.json();
-                if (json.success) {
-                    this.showToast('Permohonan ambil saldo jam berhasil dikirim!');
-                    this.showAmbilJamModal = false;
-                    this.fetchLemburData();
-                } else {
-                    this.showToast(json.message || 'Gagal mengajukan ambil jam.', 'error');
-                }
-            } catch (e) {
-                this.showToast('Terjadi kesalahan jaringan.', 'error');
-            } finally {
-                this.submittingAmbilJam = false;
+            if (json && json.success) {
+                this.showToast('Permohonan ambil saldo jam berhasil dikirim!');
+                this.showAmbilJamModal = false;
+                this.fetchLemburData();
+            } else {
+                this.showToast((json && json.message) || 'Gagal mengajukan ambil jam.', 'error');
             }
         },
 
@@ -1418,20 +1918,17 @@ function siroMobileApp() {
         // VALIDASI ATASAN ACTION
         // ===================================================================
         async setujuiLembur(id) {
-            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-            try {
-                const res = await fetch(`{{ url('/app/api/validasi/proses') }}/${id}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': token, 'Accept': 'application/json' },
-                    body: JSON.stringify({ aksi: 'setujui' })
-                });
-                const json = await res.json();
-                if (json.success) {
-                    this.showToast('Lembur berhasil disetujui!');
-                    this.fetchValidasiList();
-                }
-            } catch (e) {
-                this.showToast('Gagal memproses persetujuan.', 'error');
+            const url = '{{ route('app.api.validasi.proses', ['id' => '__ID__'], false) }}'.replace('__ID__', id);
+            const json = await this.safeFetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ aksi: 'setujui' })
+            });
+            if (json && json.success) {
+                this.showToast('Lembur berhasil disetujui!');
+                this.fetchValidasiList();
+            } else {
+                this.showToast((json && json.message) || 'Gagal memproses persetujuan.', 'error');
             }
         },
 
@@ -1439,38 +1936,32 @@ function siroMobileApp() {
             const catatan = prompt('Masukkan alasan penolakan:');
             if (!catatan) return;
 
-            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-            try {
-                const res = await fetch(`{{ url('/app/api/validasi/proses') }}/${id}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': token, 'Accept': 'application/json' },
-                    body: JSON.stringify({ aksi: 'tolak', catatan: catatan })
-                });
-                const json = await res.json();
-                if (json.success) {
-                    this.showToast('Lembur telah ditolak.');
-                    this.fetchValidasiList();
-                }
-            } catch (e) {
-                this.showToast('Gagal memproses penolakan.', 'error');
+            const url = '{{ route('app.api.validasi.proses', ['id' => '__ID__'], false) }}'.replace('__ID__', id);
+            const json = await this.safeFetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ aksi: 'tolak', catatan: catatan })
+            });
+            if (json && json.success) {
+                this.showToast('Lembur telah ditolak.');
+                this.fetchValidasiList();
+            } else {
+                this.showToast((json && json.message) || 'Gagal memproses penolakan.', 'error');
             }
         },
 
         async setujuiAmbilJam(id) {
-            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-            try {
-                const res = await fetch(`{{ url('/app/api/validasi/ambil-jam') }}/${id}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': token, 'Accept': 'application/json' },
-                    body: JSON.stringify({ aksi: 'setujui' })
-                });
-                const json = await res.json();
-                if (json.success) {
-                    this.showToast('Pengambilan jam disetujui!');
-                    this.fetchValidasiList();
-                }
-            } catch (e) {
-                this.showToast('Gagal memproses persetujuan.', 'error');
+            const url = '{{ route('app.api.validasi.ambil-jam', ['id' => '__ID__'], false) }}'.replace('__ID__', id);
+            const json = await this.safeFetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ aksi: 'setujui' })
+            });
+            if (json && json.success) {
+                this.showToast('Pengambilan jam disetujui!');
+                this.fetchValidasiList();
+            } else {
+                this.showToast((json && json.message) || 'Gagal memproses persetujuan.', 'error');
             }
         },
 
@@ -1478,26 +1969,72 @@ function siroMobileApp() {
             const catatan = prompt('Masukkan alasan penolakan:');
             if (!catatan) return;
 
-            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-            try {
-                const res = await fetch(`{{ url('/app/api/validasi/ambil-jam') }}/${id}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': token, 'Accept': 'application/json' },
-                    body: JSON.stringify({ aksi: 'tolak', catatan: catatan })
-                });
-                const json = await res.json();
-                if (json.success) {
-                    this.showToast('Pengambilan jam ditolak.');
-                    this.fetchValidasiList();
-                }
-            } catch (e) {
-                this.showToast('Gagal memproses penolakan.', 'error');
+            const url = '{{ route('app.api.validasi.ambil-jam', ['id' => '__ID__'], false) }}'.replace('__ID__', id);
+            const json = await this.safeFetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ aksi: 'tolak', catatan: catatan })
+            });
+            if (json && json.success) {
+                this.showToast('Pengambilan jam ditolak.');
+                this.fetchValidasiList();
+            } else {
+                this.showToast((json && json.message) || 'Gagal memproses penolakan.', 'error');
             }
         },
 
         // ===================================================================
-        // UBAH PASSWORD
+        // PROFIL: UPLOAD FOTO & UBAH PASSWORD
         // ===================================================================
+        openUploadFotoModal() {
+            this.fotoProfilPreview = null;
+            this.fotoProfilFile = null;
+            this.showUploadFotoModal = true;
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
+        },
+
+        async handleUploadFotoSelect(e) {
+            const rawFile = e.target.files[0];
+            e.target.value = '';
+            if (!rawFile) return;
+            try {
+                const compressed = await this.compressImageFile(rawFile, 600, 0.75);
+                this.fotoProfilPreview = compressed.dataUrl;
+                this.fotoProfilFile = compressed.file;
+            } catch (_) {
+                this.fotoProfilFile = rawFile;
+                const reader = new FileReader();
+                reader.onload = (ev) => { this.fotoProfilPreview = ev.target.result; };
+                reader.readAsDataURL(rawFile);
+            }
+        },
+
+        async submitUploadFoto() {
+            if (!this.fotoProfilFile) {
+                this.showToast('Silakan pilih foto terlebih dahulu.', 'error');
+                return;
+            }
+            this.submittingFotoProfil = true;
+            const formData = new FormData();
+            formData.append('foto', this.fotoProfilFile);
+
+            const json = await this.safeFetch('{{ route('app.api.profil.foto', [], false) }}', {
+                method: 'POST',
+                body: formData
+            }, 25000);
+            this.submittingFotoProfil = false;
+
+            if (json && json.success) {
+                if (json.data?.foto_profil) {
+                    this.profilePhotoUrl = '/storage/' + json.data.foto_profil + '?v=' + Date.now();
+                }
+                this.showToast('Foto profil berhasil diperbarui!');
+                this.showUploadFotoModal = false;
+            } else {
+                this.showToast((json && json.message) || 'Gagal mengunggah foto profil.', 'error');
+            }
+        },
+
         async submitUbahPassword() {
             if (!this.formPassword.current_password || !this.formPassword.new_password) {
                 this.showToast('Lengkapi semua kolom kata sandi.', 'error');
@@ -1508,23 +2045,18 @@ function siroMobileApp() {
                 return;
             }
 
-            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-            try {
-                const res = await fetch('{{ route('app.api.profil.password') }}', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': token, 'Accept': 'application/json' },
-                    body: JSON.stringify(this.formPassword)
-                });
-                const json = await res.json();
-                if (json.success) {
-                    this.showToast('Kata sandi berhasil diperbarui!');
-                    this.showUbahPasswordModal = false;
-                    this.formPassword = { current_password: '', new_password: '', new_password_confirmation: '' };
-                } else {
-                    this.showToast(json.message || 'Gagal mengubah kata sandi.', 'error');
-                }
-            } catch (e) {
-                this.showToast('Terjadi kesalahan jaringan.', 'error');
+            const json = await this.safeFetch('{{ route('app.api.profil.password', [], false) }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.formPassword)
+            });
+
+            if (json && json.success) {
+                this.showToast('Kata sandi berhasil diperbarui!');
+                this.showUbahPasswordModal = false;
+                this.formPassword = { current_password: '', new_password: '', new_password_confirmation: '' };
+            } else {
+                this.showToast((json && json.message) || 'Gagal mengubah kata sandi.', 'error');
             }
         }
     };
