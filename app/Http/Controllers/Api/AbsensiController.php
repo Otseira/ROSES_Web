@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\JadwalRoster;
 use App\Models\LogAbsensi;
+use App\Models\MasterShift;
 use App\Models\PengaturanAplikasi;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 
@@ -65,7 +67,7 @@ class AbsensiController extends Controller
         // ===== 2) Ambil semua sesi hari ini =====
         $rostersHariIni = JadwalRoster::with('shift')
             ->where('user_id', $user->id)
-            ->where('tanggal_dinas', $today)
+            ->whereDate('tanggal_dinas', $today)
             ->orderBy('sesi')
             ->get();
 
@@ -77,9 +79,9 @@ class AbsensiController extends Controller
         // Pre-query sesi yang sudah diabsen hari ini untuk mencegah query berulang dalam loop (N+1)
         $usedRosterIds = $rostersHariIni->isNotEmpty()
             ? LogAbsensi::whereIn('roster_id', $rostersHariIni->pluck('id'))
-                ->whereNotNull('waktu_masuk')
-                ->pluck('roster_id')
-                ->all()
+            ->whereNotNull('waktu_masuk')
+            ->pluck('roster_id')
+            ->all()
             : [];
 
         // ===== 3) Cari sesi TARGET: dalam jendela & belum diabsen =====
@@ -96,7 +98,53 @@ class AbsensiController extends Controller
             }
         }
 
-        // ===== 4) Jika tidak ada target, cek apakah ada sesi yang AKAN DATANG =====
+        $isPerubahanJadwal = false;
+
+        // ===== 3.5) Auto-Detect Shift / Perubahan Jadwal Dinas =====
+        // Bila tidak cocok dengan jadwal saat ini (misal tukar dinas mendadak atau belum diupdate admin):
+        if (!$target) {
+            $matchedShift = null;
+
+            // Prioritas 1: Jika request mengirimkan shift_id tertentu (pilihan manual karyawan)
+            if ($request->filled('shift_id')) {
+                $matchedShift = MasterShift::find($request->input('shift_id'));
+            }
+
+            // Prioritas 2: Deteksi otomatis shift aktif di unit kerja/RS yang sesuai jam kedatangan
+            if (!$matchedShift) {
+                $matchedShift = $this->cariShiftSesuaiWaktu($user, $now);
+            }
+
+            if ($matchedShift) {
+                // Cari apakah ada sesi jadwal hari ini yang belum diabsen (misal jadwal lama sebelum ditukar)
+                $unusedRoster = $rostersHariIni->first(fn($r) => !in_array($r->id, $usedRosterIds));
+
+                if ($unusedRoster) {
+                    // Update sesi lama yang belum terpakai ke shift aktual
+                    $unusedRoster->update([
+                        'shift_id'          => $matchedShift->id,
+                        'custom_jam_masuk'  => null,
+                        'custom_jam_pulang' => null,
+                        'custom_nama_shift' => null,
+                    ]);
+                    $unusedRoster->load('shift');
+                    $target = $unusedRoster;
+                } else {
+                    // Buat sesi jadwal dinas baru untuk hari ini
+                    $nextSesi = ($rostersHariIni->max('sesi') ?? 0) + 1;
+                    $target = JadwalRoster::create([
+                        'user_id'       => $user->id,
+                        'tanggal_dinas' => $today,
+                        'sesi'          => $nextSesi > 0 ? $nextSesi : 1,
+                        'shift_id'      => $matchedShift->id,
+                    ]);
+                    $target->load('shift');
+                }
+                $isPerubahanJadwal = true;
+            }
+        }
+
+        // ===== 4) Jika masih tidak ada target, cek sesi yang AKAN DATANG / SELESAI =====
         if (!$target) {
             $sesiAkanDatang = null;
             foreach ($rostersHariIni as $r) {
@@ -109,25 +157,25 @@ class AbsensiController extends Controller
                 }
             }
 
-            if ($sesiAkanDatang) {
+            if ($sesiAkanDatang && !$request->boolean('is_luar_jadwal')) {
                 [$winStart,] = self::jendelaSesi($sesiAkanDatang);
                 $jamMulai = $winStart->copy()->addMinutes(self::MASUK_CEPAT_MAKS_MENIT)->format('H:i');
                 return response()->json([
                     'success' => false,
-                    'message' => "Belum waktunya absen. Sesi {$sesiAkanDatang->sesi} baru bisa diabsen mulai pukul {$jamMulai}.",
+                    'message' => "Belum waktunya absen. Sesi {$sesiAkanDatang->sesi} baru bisa diabsen mulai pukul {$jamMulai} (atau gunakan menu Tukar Shift jika ada perubahan jadwal dinas).",
                 ], 422);
             }
 
-            // Semua sesi sudah selesai → arahkan ke On-Call
+            // Semua sesi sudah selesai → arahkan ke On-Call atau opsi tukar shift
             $logSelesaiHariIni = LogAbsensi::where('user_id', $user->id)
                 ->whereDate('waktu_masuk', $today)
                 ->whereNotNull('waktu_pulang')
                 ->exists();
 
-            if ($rostersHariIni->isNotEmpty() || $logSelesaiHariIni) {
+            if (($rostersHariIni->isNotEmpty() || $logSelesaiHariIni) && !$request->boolean('is_luar_jadwal')) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Absensi hari ini sudah selesai. Untuk tugas tambahan setelah pulang, gunakan menu On-Call.',
+                    'message' => 'Absensi jadwal dinas hari ini sudah selesai. Untuk tugas tambahan setelah pulang, gunakan menu On-Call atau pilih Tukar Shift jika dinas pengganti.',
                 ], 422);
             }
         }
@@ -140,6 +188,10 @@ class AbsensiController extends Controller
             ? $request->file('foto')->store('absensi/masuk', 'public')
             : null;
 
+        $jenisAbsen = $isPerubahanJadwal
+            ? 'perubahan_jadwal'
+            : ($target ? 'dalam_radius' : 'luar_jadwal');
+
         // ===== 6) Simpan log =====
         $log = LogAbsensi::create([
             'user_id'          => $user->id,
@@ -150,26 +202,34 @@ class AbsensiController extends Controller
             'longitude_masuk'  => $request->longitude,
             'foto_masuk'       => $fotoPath,
             'ip_address_masuk' => $request->ip(),
-            'jenis_absen'      => 'dalam_radius',
+            'jenis_absen'      => $jenisAbsen,
             'menit_terlambat'  => 0,
             'status_kehadiran' => 'Tanpa Jadwal',
         ]);
 
         self::recalculateStatus($log);
 
-        $namaSesi = $target ? ('Sesi ' . ($target->sesi ?? 1)) : 'Tanpa Jadwal';
+        $namaShiftTeks = $target?->shift?->nama_shift ?? $target?->custom_nama_shift ?? ($target ? ('Sesi ' . ($target->sesi ?? 1)) : 'Tanpa Jadwal');
+
+        if ($isPerubahanJadwal) {
+            $pesan = "Absen masuk berhasil dicatat ({$namaShiftTeks} - Perubahan Jadwal).";
+        } elseif ($target) {
+            $pesan = "Absen masuk berhasil dicatat ({$namaShiftTeks}).";
+        } else {
+            $pesan = 'Absen masuk dicatat. Belum ada jadwal dinas — status akan menyesuaikan setelah jadwal dibuat.';
+        }
 
         return response()->json([
             'success' => true,
-            'message' => $target
-                ? 'Absen masuk berhasil dicatat (' . $namaSesi . ').'
-                : 'Absen masuk dicatat. Belum ada jadwal dinas — status akan menyesuaikan setelah jadwal dibuat.',
+            'message' => $pesan,
             'data' => [
-                'waktu_masuk'     => $now->format('H:i'),
-                'roster_ada'      => $target !== null,
-                'sesi'            => $target?->sesi ?? null,
-                'status'          => $log->status_kehadiran,
-                'menit_terlambat' => $log->menit_terlambat,
+                'waktu_masuk'          => $now->format('H:i'),
+                'roster_ada'           => $target !== null,
+                'sesi'                 => $target?->sesi ?? null,
+                'nama_shift'           => $namaShiftTeks,
+                'is_perubahan_jadwal'  => $isPerubahanJadwal,
+                'status'               => $log->status_kehadiran,
+                'menit_terlambat'      => $log->menit_terlambat,
             ],
         ]);
     }
@@ -231,7 +291,7 @@ class AbsensiController extends Controller
 
         $roster = JadwalRoster::with('shift')
             ->where('user_id', $user->id)
-            ->where('tanggal_dinas', $today)
+            ->whereDate('tanggal_dinas', $today)
             ->orderBy('sesi')
             ->get()
             ->last();
@@ -297,6 +357,12 @@ class AbsensiController extends Controller
         $tanggalStr = Carbon::parse($roster->tanggal_dinas)->format('Y-m-d');
         $expected   = Carbon::parse($tanggalStr . ' ' . $jamMasuk);
 
+        // ✅ OVERNIGHT SHIFT: jika jam pulang lebih kecil dari jam masuk dan absen masuk di dini hari (< 12:00)
+        $jamPulang = $roster->custom_jam_pulang ?? ($roster->shift ? (string) $roster->shift->jam_pulang : null);
+        if ($jamPulang && $jamMasuk && $jamPulang < $jamMasuk && $log->waktu_masuk->hour < 12) {
+            $expected->subDay();
+        }
+
         $selisih   = (int) floor($expected->diffInMinutes($log->waktu_masuk, false));
 
         // ✅ Cek apakah ada kompensasi jam masuk diperlambat (Time-Off in Lieu) yang telah disetujui
@@ -329,11 +395,13 @@ class AbsensiController extends Controller
     private function validateAttendancePayload(Request $request, string $label = 'Absensi')
     {
         $request->validate([
-            'latitude'  => 'required|numeric|between:-90,90',
-            'longitude' => 'required|numeric|between:-180,180',
-            'foto'      => 'required|image|mimes:jpeg,png,jpg,webp|max:5120',
-            'accuracy'  => 'nullable|numeric|between:0,10000',
-            'is_mock'   => 'nullable|string',
+            'latitude'       => 'required|numeric|between:-90,90',
+            'longitude'      => 'required|numeric|between:-180,180',
+            'foto'           => 'required|image|mimes:jpeg,png,jpg,webp|max:5120',
+            'accuracy'       => 'nullable|numeric|between:0,10000',
+            'is_mock'        => 'nullable|string',
+            'shift_id'       => 'nullable|integer',
+            'is_luar_jadwal' => 'nullable',
         ]);
 
         // Cek indikasi manipulasi lokasi palsu (Fake GPS / Mock)
@@ -411,7 +479,7 @@ class AbsensiController extends Controller
 
         $roster = JadwalRoster::with('shift')
             ->where('user_id', $userId)
-            ->where('tanggal_dinas', $kemarin)
+            ->whereDate('tanggal_dinas', $kemarin)
             ->first();
 
         if (!$roster || !$roster->shift) return null;
@@ -463,5 +531,100 @@ class AbsensiController extends Controller
         }
 
         return [$start, $end];
+    }
+
+    /**
+     * ✅ Cari MasterShift yang aktif / sesuai dengan jam saat ini ($now).
+     * Memprioritaskan shift milik unit kerja user, lalu shift umum.
+     * Mengabaikan shift libur/off.
+     */
+    private function cariShiftSesuaiWaktu($user, Carbon $now): ?MasterShift
+    {
+        $unitId = $user->unit_kerja_id;
+
+        $shifts = MasterShift::query()
+            ->when($unitId, function ($q) use ($unitId) {
+                $q->where(function ($sub) use ($unitId) {
+                    $sub->where('unit_kerja_id', $unitId)
+                        ->orWhereNull('unit_kerja_id');
+                });
+            })
+            ->whereNotNull('jam_masuk')
+            ->whereNotNull('jam_pulang')
+            ->orderBy('jam_masuk')
+            ->get();
+
+        if ($shifts->isEmpty()) {
+            $shifts = MasterShift::whereNotNull('jam_masuk')
+                ->whereNotNull('jam_pulang')
+                ->orderBy('jam_masuk')
+                ->get();
+        }
+
+        if ($shifts->isEmpty()) {
+            return null;
+        }
+
+        $today = $now->toDateString();
+        $matchedShifts = [];
+
+        foreach ($shifts as $s) {
+            $namaShiftLow = strtolower(trim($s->nama_shift ?? ''));
+            if ($namaShiftLow === 'off' || str_contains($namaShiftLow, 'libur')) {
+                continue;
+            }
+
+            $jamMasukStr  = substr((string) $s->jam_masuk, 0, 5);
+            $jamPulangStr = substr((string) $s->jam_pulang, 0, 5);
+
+            $isOvernight = ($jamPulangStr < $jamMasukStr);
+
+            if ($isOvernight) {
+                // Shift malam lintas hari (contoh 21:00 - 07:00)
+                if ($now->hour < 12) {
+                    // Pagi dini hari (misal 00:00 - 07:00) -> sesi dinas berawal dari hari kemarin
+                    $start = Carbon::parse($now->copy()->subDay()->toDateString() . ' ' . $jamMasukStr)
+                        ->subMinutes(self::MASUK_CEPAT_MAKS_MENIT);
+                    $end   = Carbon::parse($today . ' ' . $jamPulangStr);
+                    $expected = Carbon::parse($now->copy()->subDay()->toDateString() . ' ' . $jamMasukStr);
+                } else {
+                    // Sore/malam hari (misal 19:00 - 23:59) -> sesi dinas malam hari ini
+                    $start = Carbon::parse($today . ' ' . $jamMasukStr)
+                        ->subMinutes(self::MASUK_CEPAT_MAKS_MENIT);
+                    $end   = Carbon::parse($now->copy()->addDay()->toDateString() . ' ' . $jamPulangStr);
+                    $expected = Carbon::parse($today . ' ' . $jamMasukStr);
+                }
+            } else {
+                // Shift reguler dalam 1 hari kalender (contoh 07:00 - 14:00)
+                $start = Carbon::parse($today . ' ' . $jamMasukStr)
+                    ->subMinutes(self::MASUK_CEPAT_MAKS_MENIT);
+                $end   = Carbon::parse($today . ' ' . $jamPulangStr);
+                $expected = Carbon::parse($today . ' ' . $jamMasukStr);
+            }
+
+            if ($now->gte($start) && $now->lte($end)) {
+                $diff = abs($now->diffInMinutes($expected));
+                $isUnit = ($unitId && $s->unit_kerja_id == $unitId);
+                $matchedShifts[] = [
+                    'shift'   => $s,
+                    'diff'    => $diff,
+                    'is_unit' => $isUnit,
+                ];
+            }
+        }
+
+        if (empty($matchedShifts)) {
+            return null;
+        }
+
+        // Urutkan: utamakan shift milik unit kerja sendiri, lalu selisih waktu terdekat ke jam masuk
+        usort($matchedShifts, function ($a, $b) {
+            if ($a['is_unit'] !== $b['is_unit']) {
+                return $a['is_unit'] ? -1 : 1;
+            }
+            return $a['diff'] <=> $b['diff'];
+        });
+
+        return $matchedShifts[0]['shift'];
     }
 }

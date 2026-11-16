@@ -705,6 +705,48 @@
                     </button>
                 </div>
 
+                <!-- Status Shift & Tombol Tukar Shift (Hanya saat Absen Masuk) -->
+                <div x-show="absenType === 'masuk'" class="space-y-2">
+                    <div class="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-2 text-xs">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <div class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                                <i data-lucide="clock" class="w-3.5 h-3.5"></i>
+                            </div>
+                            <div class="truncate">
+                                <div class="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Shift Kedatangan</div>
+                                <div class="font-extrabold text-slate-800 text-[11px] truncate"
+                                     x-text="selectedShiftNama || todayData.shift_nama || 'Otomatis Sesuai Waktu'"></div>
+                            </div>
+                        </div>
+                        <button type="button" @click="showShiftPicker = !showShiftPicker; if(window.lucide) setTimeout(() => lucide.createIcons(), 30)"
+                                class="shrink-0 px-2.5 py-1.5 rounded-xl bg-white text-emerald-700 font-bold text-[10px] border border-slate-200 shadow-2xs hover:bg-slate-50 active:scale-95 transition-all">
+                            <span x-text="showShiftPicker ? 'Tutup Pilihan' : 'Tukar Shift'"></span>
+                        </button>
+                    </div>
+
+                    <!-- Panel Pilihan Shift (Muncul saat ditekan) -->
+                    <div x-show="showShiftPicker" x-transition class="p-3 rounded-2xl bg-emerald-50/50 border border-emerald-200 space-y-2">
+                        <div class="flex items-center justify-between text-[11px] font-bold text-emerald-950">
+                            <span>Pilih Shift Pengganti:</span>
+                            <button type="button" @click="selectShift(null)" class="text-[10px] text-slate-500 underline font-normal">Reset Otomatis</button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-0.5">
+                            <template x-for="s in (todayData.available_shifts || [])" :key="s.id">
+                                <button type="button"
+                                        @click="selectShift(s)"
+                                        class="p-2 rounded-xl text-left border transition-all text-xs"
+                                        :class="selectedShiftId === s.id ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300'">
+                                    <div class="font-bold text-[11px] leading-tight truncate" x-text="s.nama_shift"></div>
+                                    <div class="text-[9px] opacity-80 mt-0.5" x-text="s.jam_masuk + ' - ' + s.jam_pulang"></div>
+                                </button>
+                            </template>
+                        </div>
+                        <div class="text-[9px] text-slate-500 leading-tight">
+                            * Bila tidak dipilih, sistem otomatis memilih shift berdasarkan jam kedatangan Anda di RS.
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Kamera Viewfinder Container (Rasio dinamis mengikuti orientasi kamera agar tanpa bar hitam & tanpa crop zoom) -->
                 <div class="relative w-full max-w-[340px] mx-auto max-h-[48dvh] bg-slate-950 rounded-3xl overflow-hidden shadow-inner flex items-center justify-center"
                      :style="`aspect-ratio: ${cameraAspectRatio};`">
@@ -1082,6 +1124,9 @@ function siroMobileApp() {
         capturedPhotoFile: null,
         capturedPhotoSizeLabel: '',
         submittingAbsen: false,
+        selectedShiftId: null,
+        selectedShiftNama: null,
+        showShiftPicker: false,
 
         // GPS State (Adaptive iPhone Safari)
         gpsCoords: { latitude: 0, longitude: 0, accuracy: 0, updatedAt: 0 },
@@ -1605,6 +1650,9 @@ function siroMobileApp() {
             this.capturedPhotoSizeLabel = '';
             this.cameraAspectRatio = '3 / 4';
             this.processingPhoto = false;
+            this.selectedShiftId = null;
+            this.selectedShiftNama = null;
+            this.showShiftPicker = false;
             this.showAbsenModal = true;
 
             this.refreshCsrfToken();
@@ -1616,7 +1664,22 @@ function siroMobileApp() {
         closeAbsenModal() {
             this.stopCameraStream();
             this.stopGpsWatch();
+            this.selectedShiftId = null;
+            this.selectedShiftNama = null;
+            this.showShiftPicker = false;
             this.showAbsenModal = false;
+        },
+
+        selectShift(s) {
+            if (s) {
+                this.selectedShiftId = s.id;
+                this.selectedShiftNama = `${s.nama_shift} (${s.jam_masuk} - ${s.jam_pulang})`;
+            } else {
+                this.selectedShiftId = null;
+                this.selectedShiftNama = null;
+            }
+            this.showShiftPicker = false;
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
         },
 
         updateCameraAspectRatio(event) {
@@ -1796,6 +1859,9 @@ function siroMobileApp() {
             formData.append('longitude', this.gpsCoords.longitude);
             formData.append('accuracy', Math.round(this.gpsCoords.accuracy || 15));
             formData.append('foto', this.capturedPhotoFile);
+            if (this.absenType === 'masuk' && this.selectedShiftId) {
+                formData.append('shift_id', this.selectedShiftId);
+            }
 
             const url = this.absenType === 'masuk'
                 ? '{{ route('app.api.absensi.masuk', [], false) }}'

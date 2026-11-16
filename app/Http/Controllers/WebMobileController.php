@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\RosterController as ApiRosterController;
 use App\Models\JadwalRoster;
 use App\Models\LogAbsensi;
 use App\Models\LogLembur;
+use App\Models\MasterShift;
 use App\Models\PengaturanAplikasi;
 use App\Models\User;
 use Carbon\Carbon;
@@ -117,7 +118,7 @@ class WebMobileController extends Controller
         // Roster hari ini
         $rosterHariIni = JadwalRoster::with('shift')
             ->where('user_id', $user->id)
-            ->where('tanggal_dinas', $today)
+            ->whereDate('tanggal_dinas', $today)
             ->orderBy('sesi')
             ->first();
 
@@ -154,21 +155,62 @@ class WebMobileController extends Controller
             }
         }
 
+        // Tentukan roster aktif: utamakan roster yang terkait dengan log absensi hari ini (jika ada tukar/perubahan shift)
+        $rosterAktif = $logHariIni?->roster ?? $rosterHariIni;
+
+        $shiftNama = $rosterAktif?->custom_nama_shift 
+            ?? $rosterAktif?->shift?->nama_shift 
+            ?? ($logHariIni ? ($logHariIni->status_kehadiran ?: 'Tanpa Jadwal') : 'Tanpa Jadwal');
+
+        $jamMasukJadwal = $rosterAktif?->custom_jam_masuk 
+            ?? ($rosterAktif?->shift?->jam_masuk ? substr((string) $rosterAktif->shift->jam_masuk, 0, 5) : '-');
+
+        $jamPulangJadwal = $rosterAktif?->custom_jam_pulang 
+            ?? ($rosterAktif?->shift?->jam_pulang ? substr((string) $rosterAktif->shift->jam_pulang, 0, 5) : '-');
+
+        // Daftar Master Shift yang tersedia untuk unit kerja user (untuk opsi Tukar Shift)
+        $unitId = $user->unit_kerja_id;
+        $availableShifts = MasterShift::query()
+            ->when($unitId, function ($q) use ($unitId) {
+                $q->where(function ($sub) use ($unitId) {
+                    $sub->where('unit_kerja_id', $unitId)
+                        ->orWhereNull('unit_kerja_id');
+                });
+            })
+            ->whereNotNull('jam_masuk')
+            ->whereNotNull('jam_pulang')
+            ->orderBy('jam_masuk')
+            ->get(['id', 'nama_shift', 'jam_masuk', 'jam_pulang'])
+            ->filter(function ($s) {
+                $low = strtolower(trim($s->nama_shift ?? ''));
+                return $low !== 'off' && !str_contains($low, 'libur');
+            })
+            ->values()
+            ->map(function ($s) {
+                return [
+                    'id'         => $s->id,
+                    'nama_shift' => $s->nama_shift,
+                    'jam_masuk'  => substr((string) $s->jam_masuk, 0, 5),
+                    'jam_pulang' => substr((string) $s->jam_pulang, 0, 5),
+                ];
+            });
+
         return response()->json([
             'success'    => true,
             'csrf_token' => csrf_token(),
             'data'       => [
                 'tanggal'           => $now->translatedFormat('l, d F Y'),
                 'jam_sekarang'      => $now->format('H:i'),
-                'shift_nama'        => $rosterHariIni?->shift?->nama_shift ?? 'Tanpa Jadwal',
-                'jam_masuk_jadwal'  => $rosterHariIni?->shift?->jam_masuk ? substr($rosterHariIni->shift->jam_masuk, 0, 5) : '-',
-                'jam_pulang_jadwal' => $rosterHariIni?->shift?->jam_pulang ? substr($rosterHariIni->shift->jam_pulang, 0, 5) : '-',
+                'shift_nama'        => $shiftNama,
+                'jam_masuk_jadwal'  => $jamMasukJadwal,
+                'jam_pulang_jadwal' => $jamPulangJadwal,
                 'is_masuk_done'     => $logHariIni && $logHariIni->waktu_masuk !== null,
                 'waktu_masuk'       => $logHariIni?->waktu_masuk ? Carbon::parse($logHariIni->waktu_masuk)->format('H:i') : null,
                 'is_pulang_done'    => $logHariIni && $logHariIni->waktu_pulang !== null,
                 'waktu_pulang'      => $logHariIni?->waktu_pulang ? Carbon::parse($logHariIni->waktu_pulang)->format('H:i') : null,
                 'status_kehadiran'  => $logHariIni?->status_kehadiran,
                 'menit_terlambat'   => $logHariIni?->menit_terlambat ?? 0,
+                'available_shifts'  => $availableShifts,
                 'on_call_aktif'     => $onCallAktif ? [
                     'id'           => $onCallAktif->id,
                     'waktu_mulai'  => Carbon::parse($onCallAktif->waktu_mulai_lembur)->format('H:i'),

@@ -2,9 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Models\JadwalRoster;
+use App\Models\LogAbsensi;
+use App\Models\MasterShift;
 use App\Models\MasterUnitKerja;
 use App\Models\PengaturanAplikasi;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Schema;
@@ -98,6 +102,9 @@ class MobileWebAttendanceTest extends TestCase
             $table->string('nama_shift');
             $table->string('jam_masuk');
             $table->string('jam_pulang');
+            $table->integer('toleransi_terlambat_menit')->default(5);
+            $table->unsignedBigInteger('unit_kerja_id')->nullable();
+            $table->text('keterangan')->nullable();
             $table->timestamps();
         });
 
@@ -149,6 +156,18 @@ class MobileWebAttendanceTest extends TestCase
             $table->decimal('longitude_masuk', 11, 8)->nullable();
             $table->string('foto_masuk')->nullable();
             $table->string('foto_keluar')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('pengambilan_lemburs', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('user_id');
+            $table->date('tanggal_dinas');
+            $table->string('tipe_pengambilan');
+            $table->integer('durasi_menit');
+            $table->text('keterangan')->nullable();
+            $table->string('status_validasi')->default('Pending');
+            $table->unsignedBigInteger('divalidasi_oleh')->nullable();
             $table->timestamps();
         });
     }
@@ -296,5 +315,177 @@ class MobileWebAttendanceTest extends TestCase
                     'hari_awal_minggu' => 2,
                 ],
             ]);
+    }
+
+    public function test_clock_in_auto_adapts_to_shift_change_when_employee_swaps_shift(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-16 07:02:00'));
+
+        $shiftPagi = MasterShift::create([
+            'nama_shift'                => 'Shift Pagi',
+            'jam_masuk'                 => '07:00:00',
+            'jam_pulang'                => '14:00:00',
+            'toleransi_terlambat_menit' => 5,
+            'unit_kerja_id'             => $this->user->unit_kerja_id,
+        ]);
+
+        $shiftSiang = MasterShift::create([
+            'nama_shift'                => 'Shift Siang',
+            'jam_masuk'                 => '14:00:00',
+            'jam_pulang'                => '21:00:00',
+            'toleransi_terlambat_menit' => 5,
+            'unit_kerja_id'             => $this->user->unit_kerja_id,
+        ]);
+
+        // Karyawan awalnya dijadwalkan Shift Siang (14:00)
+        $roster = JadwalRoster::create([
+            'user_id'       => $this->user->id,
+            'shift_id'      => $shiftSiang->id,
+            'tanggal_dinas' => '2026-11-16',
+            'sesi'          => 1,
+        ]);
+
+        $photo = UploadedFile::fake()->image('selfie_swap.jpg', 600, 800);
+
+        // Karyawan datang jam 07:02 pagi karena tukar dinas ke Shift Pagi
+        $response = $this->actingAs($this->user)
+            ->postJson('/app/api/absensi/masuk', [
+                'latitude'  => -0.947110,
+                'longitude' => 100.417180,
+                'accuracy'  => 50,
+                'foto'      => $photo,
+            ]);
+
+        $response->assertOk()
+            ->assertJson([
+                'success' => true,
+                'data'    => [
+                    'is_perubahan_jadwal' => true,
+                    'status'              => 'Tepat Waktu',
+                    'nama_shift'          => 'Shift Pagi',
+                ],
+            ]);
+
+        // Roster otomatis diperbarui ke shift yang dihadiri
+        $this->assertEquals($shiftPagi->id, $roster->fresh()->shift_id);
+
+        // Log absensi tercatat dengan jenis perubahan_jadwal
+        $log = LogAbsensi::where('user_id', $this->user->id)->first();
+        $this->assertNotNull($log);
+        $this->assertEquals('perubahan_jadwal', $log->jenis_absen);
+        $this->assertEquals('Tepat Waktu', $log->status_kehadiran);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_clock_in_adapts_when_swapped_from_morning_to_afternoon_shift(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-16 14:03:00'));
+
+        $shiftPagi = MasterShift::create([
+            'nama_shift'                => 'Shift Pagi',
+            'jam_masuk'                 => '07:00:00',
+            'jam_pulang'                => '14:00:00',
+            'toleransi_terlambat_menit' => 5,
+            'unit_kerja_id'             => $this->user->unit_kerja_id,
+        ]);
+
+        $shiftSiang = MasterShift::create([
+            'nama_shift'                => 'Shift Siang',
+            'jam_masuk'                 => '14:00:00',
+            'jam_pulang'                => '21:00:00',
+            'toleransi_terlambat_menit' => 5,
+            'unit_kerja_id'             => $this->user->unit_kerja_id,
+        ]);
+
+        // Karyawan awalnya dijadwalkan Shift Pagi (07:00 - 14:00), tapi tidak masuk pagi karena tukar dinas siang
+        $roster = JadwalRoster::create([
+            'user_id'       => $this->user->id,
+            'shift_id'      => $shiftPagi->id,
+            'tanggal_dinas' => '2026-11-16',
+            'sesi'          => 1,
+        ]);
+
+        $photo = UploadedFile::fake()->image('selfie_afternoon.jpg', 600, 800);
+
+        // Karyawan datang jam 14:03 untuk dinas siang
+        $response = $this->actingAs($this->user)
+            ->postJson('/app/api/absensi/masuk', [
+                'latitude'  => -0.947110,
+                'longitude' => 100.417180,
+                'accuracy'  => 50,
+                'foto'      => $photo,
+            ]);
+
+        $response->assertOk()
+            ->assertJson([
+                'success' => true,
+                'data'    => [
+                    'is_perubahan_jadwal' => true,
+                    'status'              => 'Tepat Waktu',
+                    'nama_shift'          => 'Shift Siang',
+                ],
+            ]);
+
+        // Roster otomatis diperbarui ke Shift Siang
+        $this->assertEquals($shiftSiang->id, $roster->fresh()->shift_id);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_clock_in_with_explicit_shift_id_selection(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-16 07:10:00'));
+
+        $shiftPagi = MasterShift::create([
+            'nama_shift'                => 'Shift Pagi Khusus',
+            'jam_masuk'                 => '07:00:00',
+            'jam_pulang'                => '14:00:00',
+            'toleransi_terlambat_menit' => 5,
+            'unit_kerja_id'             => $this->user->unit_kerja_id,
+        ]);
+
+        $photo = UploadedFile::fake()->image('selfie_manual.jpg', 600, 800);
+
+        // Karyawan memilih shift_id manual lewat popup Tukar Shift
+        $response = $this->actingAs($this->user)
+            ->postJson('/app/api/absensi/masuk', [
+                'latitude'  => -0.947110,
+                'longitude' => 100.417180,
+                'accuracy'  => 40,
+                'foto'      => $photo,
+                'shift_id'  => $shiftPagi->id,
+            ]);
+
+        $response->assertOk()
+            ->assertJson([
+                'success' => true,
+                'data'    => [
+                    'is_perubahan_jadwal' => true,
+                    'nama_shift'          => 'Shift Pagi Khusus',
+                ],
+            ]);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_today_status_returns_available_shifts(): void
+    {
+        MasterShift::create([
+            'nama_shift'    => 'Shift IGD Pagi',
+            'jam_masuk'     => '07:00:00',
+            'jam_pulang'    => '14:00:00',
+            'unit_kerja_id' => $this->user->unit_kerja_id,
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->getJson('/app/api/today-status')
+            ->assertOk();
+
+        $this->assertTrue($response->json('success'));
+        $shifts = $response->json('data.available_shifts');
+        $this->assertIsArray($shifts);
+        $this->assertNotEmpty($shifts);
+        $this->assertEquals('Shift IGD Pagi', $shifts[0]['nama_shift']);
     }
 }
