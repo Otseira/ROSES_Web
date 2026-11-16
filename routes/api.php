@@ -35,6 +35,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/absensi/masuk',      [AbsensiController::class, 'clockIn']);
     Route::post('/absensi/pulang',     [AbsensiController::class, 'clockOut']);
     Route::get('/absensi/info-shift',  [LemburController::class, 'infoShiftHariIni']);
+    Route::get('/absensi/today-status', [\App\Http\Controllers\WebMobileController::class, 'todayStatus']);
 
     // ===================================================================
     // LEMBUR / ON-CALL (alur 1x tekan → form → foto → selesai otomatis)

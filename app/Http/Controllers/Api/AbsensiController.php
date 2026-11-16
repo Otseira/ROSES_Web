@@ -157,7 +157,9 @@ class AbsensiController extends Controller
                 }
             }
 
-            if ($sesiAkanDatang && !$request->boolean('is_luar_jadwal')) {
+            $isLuarJadwalReq = $request->boolean('is_luar_jadwal') || $request->input('mode') === 'luar_jadwal';
+
+            if ($sesiAkanDatang && !$isLuarJadwalReq) {
                 [$winStart,] = self::jendelaSesi($sesiAkanDatang);
                 $jamMulai = $winStart->copy()->addMinutes(self::MASUK_CEPAT_MAKS_MENIT)->format('H:i');
                 return response()->json([
@@ -172,7 +174,7 @@ class AbsensiController extends Controller
                 ->whereNotNull('waktu_pulang')
                 ->exists();
 
-            if (($rostersHariIni->isNotEmpty() || $logSelesaiHariIni) && !$request->boolean('is_luar_jadwal')) {
+            if (($rostersHariIni->isNotEmpty() || $logSelesaiHariIni) && !$isLuarJadwalReq) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Absensi jadwal dinas hari ini sudah selesai. Untuk tugas tambahan setelah pulang, gunakan menu On-Call atau pilih Tukar Shift jika dinas pengganti.',
@@ -300,12 +302,40 @@ class AbsensiController extends Controller
             $roster = $this->cariRosterShiftMalamAktif($user->id, $now);
         }
 
+        // Daftar Master Shift yang tersedia untuk unit kerja user (untuk opsi Tukar Shift)
+        $unitId = $user->unit_kerja_id;
+        $availableShifts = MasterShift::query()
+            ->when($unitId, function ($q) use ($unitId) {
+                $q->where(function ($sub) use ($unitId) {
+                    $sub->where('unit_kerja_id', $unitId)
+                        ->orWhereNull('unit_kerja_id');
+                });
+            })
+            ->whereNotNull('jam_masuk')
+            ->whereNotNull('jam_pulang')
+            ->orderBy('jam_masuk')
+            ->get(['id', 'nama_shift', 'jam_masuk', 'jam_pulang'])
+            ->filter(function ($s) {
+                $low = strtolower(trim($s->nama_shift ?? ''));
+                return $low !== 'off' && !str_contains($low, 'libur');
+            })
+            ->values()
+            ->map(function ($s) {
+                return [
+                    'id'         => $s->id,
+                    'nama_shift' => $s->nama_shift,
+                    'jam_masuk'  => substr((string) $s->jam_masuk, 0, 5),
+                    'jam_pulang' => substr((string) $s->jam_pulang, 0, 5),
+                ];
+            });
+
         if (!$roster || !$roster->shift) {
             return response()->json([
                 'success' => true,
                 'data'    => [
-                    'roster_ada' => false,
-                    'pesan'      => 'Anda belum memiliki jadwal dinas. Absensi tetap bisa dilakukan.',
+                    'roster_ada'       => false,
+                    'pesan'            => 'Anda belum memiliki jadwal dinas. Absensi tetap bisa dilakukan.',
+                    'available_shifts' => $availableShifts,
                 ],
             ]);
         }
@@ -313,11 +343,12 @@ class AbsensiController extends Controller
         return response()->json([
             'success' => true,
             'data'    => [
-                'roster_ada'    => true,
-                'nama_shift'    => $roster->shift->nama_shift,
-                'jam_masuk'     => substr((string) $roster->shift->jam_masuk, 0, 5),
-                'jam_pulang'    => substr((string) $roster->shift->jam_pulang, 0, 5),
-                'tanggal_dinas' => $roster->tanggal_dinas,
+                'roster_ada'       => true,
+                'nama_shift'       => $roster->shift->nama_shift,
+                'jam_masuk'        => substr((string) $roster->shift->jam_masuk, 0, 5),
+                'jam_pulang'       => substr((string) $roster->shift->jam_pulang, 0, 5),
+                'tanggal_dinas'    => $roster->tanggal_dinas,
+                'available_shifts' => $availableShifts,
             ],
         ]);
     }
@@ -402,6 +433,7 @@ class AbsensiController extends Controller
             'is_mock'        => 'nullable|string',
             'shift_id'       => 'nullable|integer',
             'is_luar_jadwal' => 'nullable',
+            'mode'           => 'nullable|string',
         ]);
 
         // Cek indikasi manipulasi lokasi palsu (Fake GPS / Mock)
