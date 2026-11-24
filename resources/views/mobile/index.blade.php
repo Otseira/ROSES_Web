@@ -470,11 +470,39 @@
                         <span class="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-700" x-text="item.status_validasi"></span>
                     </div>
 
-                    <div class="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-2xl border border-slate-100" x-text="item.alasan_lembur || 'Tanpa keterangan'"></div>
+                    <!-- Durasi Lembur: berapa menit lalu dalam kurung berapa jamnya -->
+                    <div class="flex items-center gap-2">
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 font-extrabold text-xs border border-emerald-100">
+                            <i data-lucide="clock" class="w-3.5 h-3.5 text-emerald-600"></i>
+                            <span x-text="item.durasi_detail || item.durasi_teks || (item.durasi_menit + ' Menit')"></span>
+                        </span>
+                    </div>
+
+                    <!-- Alasan / Uraian Tugas Lembur -->
+                    <div class="text-xs text-slate-700 bg-slate-50 p-3 rounded-2xl border border-slate-100 space-y-1">
+                        <div class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Alasan Lembur:</div>
+                        <div class="font-medium text-slate-800 leading-relaxed" x-text="item.alasan || item.alasan_lembur || 'Tanpa keterangan'"></div>
+                    </div>
+
+                    <!-- Info Peta & Jarak dari RS -->
+                    <template x-if="item.jarak_teks || (item.lat_masuk && item.lng_masuk) || (item.latitude_masuk && item.longitude_masuk)">
+                        <div class="flex items-center justify-between gap-2 p-2.5 rounded-2xl bg-slate-50 border border-slate-100 text-[11px]">
+                            <div class="flex items-center gap-1.5 text-slate-700 truncate min-w-0">
+                                <i data-lucide="map-pin" class="w-3.5 h-3.5 text-rose-500 shrink-0"></i>
+                                <span class="font-bold truncate" x-text="item.jarak_teks || 'Lokasi terverifikasi GPS'"></span>
+                            </div>
+                            <a :href="'https://www.google.com/maps?q=' + (item.lat_masuk || item.latitude_masuk || item.lat_keluar || item.latitude_keluar) + ',' + (item.lng_masuk || item.longitude_masuk || item.lng_keluar || item.longitude_keluar)"
+                               target="_blank"
+                               class="shrink-0 px-2.5 py-1 rounded-xl bg-white border border-slate-200 text-primary-600 font-bold hover:bg-slate-50 active:scale-95 transition-all flex items-center gap-1 shadow-2xs">
+                                <i data-lucide="navigation" class="w-3 h-3"></i>
+                                <span>Peta</span>
+                            </a>
+                        </div>
+                    </template>
 
                     <div class="text-[11px] text-slate-500 flex items-center justify-between">
-                        <span x-text="item.tanggal_lembur"></span>
-                        <span class="font-bold text-slate-800" x-text="(item.waktu_mulai || '') + ' - ' + (item.waktu_selesai || '')"></span>
+                        <span x-text="item.tanggal || item.tanggal_lembur"></span>
+                        <span class="font-bold text-slate-800" x-text="(item.waktu_mulai || item.jam_mulai || '') + ' - ' + (item.waktu_selesai || item.jam_selesai || '')"></span>
                     </div>
 
                     <!-- Tombol Aksi Verifikasi -->
@@ -751,8 +779,10 @@
                 <div class="relative w-full max-w-[340px] mx-auto max-h-[48dvh] bg-slate-950 rounded-3xl overflow-hidden shadow-inner flex items-center justify-center"
                      :style="`aspect-ratio: ${cameraAspectRatio};`">
                     
-                    <!-- Video Stream WebRTC (Gerak kanan = kanan, tanpa crop) -->
-                    <video x-ref="videoElement" @loadedmetadata="updateCameraAspectRatio($event)" autoplay playsinline muted style="transform: scaleX(-1); -webkit-transform: scaleX(-1);" class="w-full h-full object-cover" x-show="cameraStreamActive && !capturedPhotoBlob"></video>
+                    <!-- Video Stream WebRTC (Arah kamera mengikuti pengguna, bebas dipilih normal / cermin) -->
+                    <video x-ref="videoElement" @loadedmetadata="updateCameraAspectRatio($event)" autoplay playsinline muted
+                           :style="isCameraMirrored ? 'transform: scaleX(-1); -webkit-transform: scaleX(-1);' : 'transform: none;'"
+                           class="w-full h-full object-cover" x-show="cameraStreamActive && !capturedPhotoBlob"></video>
 
                     <!-- Preview Foto yang Sudah Dijepret -->
                     <img x-show="capturedPhotoBlob" :src="capturedPhotoBlob" class="w-full h-full object-cover" alt="Selfie Preview">
@@ -763,6 +793,14 @@
                             <span class="text-[10px] font-bold text-white/85 bg-slate-950/50 px-2.5 py-0.5 rounded-full">Posisikan Wajah</span>
                         </div>
                     </div>
+
+                    <!-- Tombol Cepat Toggle Mirror / Flip Kamera (Mengikuti arah gerakan wajah) -->
+                    <button type="button" x-show="cameraStreamActive && !capturedPhotoBlob"
+                            @click="toggleCameraMirror()"
+                            class="absolute top-3 right-3 px-2.5 py-1.5 rounded-full bg-slate-950/70 hover:bg-slate-900 text-white text-[10px] font-bold backdrop-blur-md border border-white/20 flex items-center gap-1.5 shadow-md active:scale-95 transition-all z-10">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                        <span x-text="isCameraMirrored ? 'Cermin: Aktif' : 'Cermin: Nonaktif (Normal)'"></span>
+                    </button>
 
                     <!-- Placeholder Jika Kamera Belum Aktif atau Native Mode -->
                     <div x-show="!cameraStreamActive && !capturedPhotoBlob" class="text-center p-4 text-white space-y-2.5">
@@ -832,17 +870,17 @@
                 <div class="space-y-3 text-xs">
                     <div class="p-3 rounded-2xl bg-slate-50 flex items-center justify-between">
                         <span class="text-slate-500 font-medium">Shift Kerja</span>
-                        <span class="font-bold text-slate-900" x-text="selectedRosterDay.nama_shift || 'Libur / Off'"></span>
+                        <span class="font-bold text-slate-900" x-text="selectedRosterDay.nama_shift || (selectedRosterDay.is_libur ? 'Libur / Off' : 'Belum Ada Jadwal')"></span>
                     </div>
 
                     <div class="grid grid-cols-2 gap-2 text-center">
                         <div class="p-2.5 rounded-xl border border-slate-100">
                             <span class="text-[10px] text-slate-400 block">Jadwal Masuk</span>
-                            <span class="font-bold text-slate-800" x-text="selectedRosterDay.jam_masuk || '-'"></span>
+                            <span class="font-bold text-slate-800" x-text="selectedRosterDay.jam_masuk || (selectedRosterDay.has_jadwal ? '-' : 'Belum Diinput')"></span>
                         </div>
                         <div class="p-2.5 rounded-xl border border-slate-100">
                             <span class="text-[10px] text-slate-400 block">Jadwal Pulang</span>
-                            <span class="font-bold text-slate-800" x-text="selectedRosterDay.jam_keluar || '-'"></span>
+                            <span class="font-bold text-slate-800" x-text="selectedRosterDay.jam_keluar || (selectedRosterDay.has_jadwal ? '-' : 'Belum Diinput')"></span>
                         </div>
                     </div>
 
@@ -856,6 +894,14 @@
                             <span class="font-bold" x-text="selectedRosterDay.absen_pulang || 'Belum'"></span>
                         </div>
                     </div>
+
+                    <!-- Status Keterlambatan: Hanya aktif jika jadwal dinas sudah diinput -->
+                    <template x-if="selectedRosterDay.absen_masuk">
+                        <div class="p-2.5 rounded-xl text-center text-xs font-bold"
+                             :class="selectedRosterDay.has_jadwal && selectedRosterDay.terlambat_menit > 0 ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'">
+                            <span x-text="!selectedRosterDay.has_jadwal ? 'Status: Hadir (Jadwal Belum Diinput)' : (selectedRosterDay.terlambat_menit > 0 ? 'Terlambat ' + selectedRosterDay.terlambat_menit + ' Menit' : 'Tepat Waktu')"></span>
+                        </div>
+                    </template>
 
                     <template x-if="selectedRosterDay.sesi2">
                         <div class="p-3 rounded-2xl bg-purple-50 border border-purple-100 space-y-2">
@@ -890,18 +936,102 @@
                     <span class="truncate pr-2" x-text="gpsStatus.message"></span>
                     <button type="button" @click="startGpsWatch(true)" class="font-bold text-primary-600 shrink-0">Refresh</button>
                 </div>
-                <div>
-                    <label class="block font-bold text-slate-700 mb-1">Durasi Lembur (Menit)</label>
-                    <select x-model="formEkstensi.durasi_menit" class="w-full p-3 rounded-2xl border border-slate-200 bg-white font-medium">
-                        <option value="60">60 Menit (1 Jam)</option>
-                        <option value="120">120 Menit (2 Jam)</option>
-                        <option value="180">180 Menit (3 Jam)</option>
-                        <option value="240">240 Menit (4 Jam)</option>
-                    </select>
+
+                <!-- Info Syarat 6 Jam 40 Menit -->
+                <template x-if="!(todayData.bisa_lembur || (infoShiftData && infoShiftData.bisa_ekstensi))">
+                    <div class="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-1">
+                        <div class="font-extrabold flex items-center gap-1.5 text-amber-800">
+                            <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-600"></i>
+                            <span>Syarat 6 Jam 40 Menit Belum Tercapai</span>
+                        </div>
+                        <p class="text-[11px] leading-relaxed opacity-90"
+                           x-text="(infoShiftData && infoShiftData.pesan) || ('Masuk pukul ' + (todayData.waktu_masuk || '-') + ' WIB. Lembur baru dapat diajukan setelah berdinas 6 jam 40 menit (mulai ' + (todayData.jam_ambang_lembur || '-') + ' WIB).')"></p>
+                    </div>
+                </template>
+
+                <template x-if="todayData.bisa_lembur || (infoShiftData && infoShiftData.bisa_ekstensi)">
+                    <div class="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs space-y-1">
+                        <div class="flex items-center justify-between font-extrabold text-[11px]">
+                            <span class="flex items-center gap-1.5 text-emerald-800">
+                                <i data-lucide="check-circle" class="w-4 h-4 text-emerald-600"></i>
+                                <span>Syarat Dinas Terpenuhi (>6j 40m)</span>
+                            </span>
+                            <span class="px-2 py-0.5 rounded-full bg-emerald-200/70 text-emerald-900 font-black text-[10px]"
+                                  x-text="'Masuk ' + (todayData.waktu_masuk || (infoShiftData && infoShiftData.jam_masuk) || '-') + ' WIB'"></span>
+                        </div>
+                        <p class="text-[11px] text-emerald-900/90 leading-relaxed">
+                            Jam dinas reguler berakhir di <strong x-text="(todayData.jam_ambang_lembur || (infoShiftData && infoShiftData.jam_ambang_lembur)) + ' WIB'"></strong>. Jam dinas lembur dihitung setelah waktu tersebut.
+                        </p>
+                    </div>
+                </template>
+
+                <!-- Pilihan Mode Durasi Lembur: Otomatis, Pilihan Preset, Manual -->
+                <div class="space-y-1.5">
+                    <label class="block font-bold text-slate-700">Pilih Metode Durasi Lembur</label>
+                    <div class="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-2xl">
+                        <button type="button"
+                                @click="formEkstensi.mode = 'otomatis'; formEkstensi.durasi_menit = (infoShiftData?.durasi_otomatis_menit || todayData?.durasi_otomatis_menit || 60)"
+                                class="py-2 px-1 rounded-xl text-center font-bold text-[11px] transition-all"
+                                :class="formEkstensi.mode === 'otomatis' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'">
+                            ⚡ Otomatis
+                        </button>
+                        <button type="button"
+                                @click="formEkstensi.mode = 'preset'; formEkstensi.durasi_menit = 60"
+                                class="py-2 px-1 rounded-xl text-center font-bold text-[11px] transition-all"
+                                :class="formEkstensi.mode === 'preset' ? 'bg-white text-primary-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'">
+                            📋 Pilihan
+                        </button>
+                        <button type="button"
+                                @click="formEkstensi.mode = 'manual'; formEkstensi.durasi_menit = ''"
+                                class="py-2 px-1 rounded-xl text-center font-bold text-[11px] transition-all"
+                                :class="formEkstensi.mode === 'manual' ? 'bg-white text-primary-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'">
+                            ✏️ Manual
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 1. MODE OTOMATIS -->
+                <div x-show="formEkstensi.mode === 'otomatis'" class="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200/80 space-y-1">
+                    <div class="text-[10px] uppercase font-black tracking-wider text-emerald-700">Durasi Lembur Otomatis</div>
+                    <div class="text-base font-black text-emerald-950 flex items-center gap-1.5">
+                        <i data-lucide="zap" class="w-4 h-4 text-emerald-600"></i>
+                        <span x-text="todayData.durasi_otomatis_teks ? (todayData.durasi_otomatis_menit + ' Menit (' + todayData.durasi_otomatis_teks + ')') : ((infoShiftData?.durasi_otomatis_menit || formEkstensi.durasi_menit || 0) + ' Menit')"></span>
+                    </div>
+                    <div class="text-[10px] text-slate-500 leading-tight">
+                        * Dihitung dari selesai dinas 6 jam 40 menit (<span x-text="todayData.jam_ambang_lembur || (infoShiftData && infoShiftData.jam_ambang_lembur) || '-'"></span> WIB) sampai saat ini.
+                    </div>
+                </div>
+
+                <!-- 2. MODE PRESET -->
+                <div x-show="formEkstensi.mode === 'preset'" class="space-y-1.5">
+                    <label class="block font-bold text-slate-700">Pilihan Cepat Durasi</label>
+                    <div class="grid grid-cols-3 gap-1.5">
+                        <template x-for="opt in [30, 60, 90, 120, 180, 240]" :key="opt">
+                            <button type="button" @click="formEkstensi.durasi_menit = opt"
+                                    class="p-2 rounded-xl border text-center transition-all text-xs"
+                                    :class="formEkstensi.durasi_menit == opt ? 'bg-primary-600 text-white border-primary-600 font-bold shadow-xs' : 'bg-white text-slate-700 border-slate-200 hover:border-primary-300'">
+                                <div x-text="opt + ' Menit'"></div>
+                                <div class="text-[9px] opacity-80" x-text="'(' + (opt/60).toFixed(opt % 60 === 0 ? 0 : 1) + ' Jam)'"></div>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- 3. MODE MANUAL -->
+                <div x-show="formEkstensi.mode === 'manual'" class="space-y-1.5">
+                    <label class="block font-bold text-slate-700">Input Manual Durasi (Menit)</label>
+                    <div class="relative">
+                        <input type="number" step="5" min="15" x-model.number="formEkstensi.durasi_menit" placeholder="Contoh: 45, 75, 100"
+                               class="w-full p-3 rounded-2xl border border-slate-200 font-semibold text-slate-900 pr-16">
+                        <span class="absolute right-3.5 top-3.5 text-xs text-slate-400 font-bold">Menit</span>
+                    </div>
+                    <div x-show="formEkstensi.durasi_menit > 0" class="text-[11px] font-bold text-primary-600">
+                        = <span x-text="Math.floor(formEkstensi.durasi_menit / 60) + ' Jam ' + (formEkstensi.durasi_menit % 60 > 0 ? (formEkstensi.durasi_menit % 60 + ' Menit') : '')"></span>
+                    </div>
                 </div>
 
                 <div>
-                    <label class="block font-bold text-slate-700 mb-1">Keterangan / Tugas Lembur</label>
+                    <label class="block font-bold text-slate-700 mb-1">Alasan / Tugas Lembur</label>
                     <textarea x-model="formEkstensi.keterangan" rows="3" placeholder="Jelaskan alasan dan tugas lembur lanjutan..." class="w-full p-3 rounded-2xl border border-slate-200 font-medium"></textarea>
                 </div>
 
@@ -910,7 +1040,9 @@
                     <input type="file" accept="image/*" capture="user" @change="handleEkstensiFoto($event)" class="w-full text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-700">
                 </div>
 
-                <button @click="submitEkstensi()" :disabled="submittingEkstensi" class="w-full py-3.5 rounded-2xl bg-primary-600 text-white font-bold hover:bg-primary-700 active:scale-95 transition-all shadow-md">
+                <button @click="submitEkstensi()"
+                        :disabled="submittingEkstensi || !(todayData.bisa_lembur || (infoShiftData && infoShiftData.bisa_ekstensi))"
+                        class="w-full py-3.5 rounded-2xl bg-primary-600 text-white font-bold hover:bg-primary-700 active:scale-95 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
                     <span x-text="submittingEkstensi ? 'Mengirimkan...' : 'Kirim Pengajuan Ekstensi'"></span>
                 </button>
             </div>
@@ -1085,7 +1217,8 @@ function siroMobileApp() {
         loadingLembur: false,
         lemburLoaded: false,
         showEkstensiModal: false,
-        formEkstensi: { durasi_menit: 60, keterangan: '', foto: null },
+        infoShiftData: null,
+        formEkstensi: { mode: 'otomatis', durasi_menit: 0, keterangan: '', foto: null },
         submittingEkstensi: false,
 
         showOnCallModal: false,
@@ -1120,6 +1253,7 @@ function siroMobileApp() {
         cameraAspectRatio: '3 / 4',
         cameraStatusMessage: 'Menghubungkan Kamera...',
         processingPhoto: false,
+        isCameraMirrored: (localStorage.getItem('siro_camera_mirrored') === 'true'),
         capturedPhotoBlob: null,
         capturedPhotoFile: null,
         capturedPhotoSizeLabel: '',
@@ -1756,6 +1890,14 @@ function siroMobileApp() {
             this.cameraStreamActive = false;
         },
 
+        toggleCameraMirror() {
+            this.isCameraMirrored = !this.isCameraMirrored;
+            try {
+                localStorage.setItem('siro_camera_mirrored', this.isCameraMirrored ? 'true' : 'false');
+            } catch (e) {}
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
+        },
+
         async snapPhoto() {
             const video = this.$refs.videoElement;
             const canvas = this.$refs.canvasElement;
@@ -1781,12 +1923,16 @@ function siroMobileApp() {
                 canvas.width = w;
                 canvas.height = h;
                 const ctx = canvas.getContext('2d');
-                // Sesuaikan hasil jepretan dengan orientasi preview kamera (kanan = kanan, kiri = kiri)
-                ctx.save();
-                ctx.translate(w, 0);
-                ctx.scale(-1, 1);
-                ctx.drawImage(video, 0, 0, w, h);
-                ctx.restore();
+                // Sesuai preferensi cermin: jika normal (non-mirror), orientasi searah (kiri = kiri, kanan = kanan)
+                if (this.isCameraMirrored) {
+                    ctx.save();
+                    ctx.translate(w, 0);
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(video, 0, 0, w, h);
+                    ctx.restore();
+                } else {
+                    ctx.drawImage(video, 0, 0, w, h);
+                }
 
                 const result = await this.compressCanvasToJpeg(canvas, 0.72);
                 this.capturedPhotoBlob = result.dataUrl;
@@ -1883,10 +2029,27 @@ function siroMobileApp() {
         // ===================================================================
         // LEMBUR, ON-CALL & AMBIL JAM ACTION
         // ===================================================================
-        openEkstensiModal() {
-            this.formEkstensi = { durasi_menit: 60, keterangan: '', foto: null };
+        async openEkstensiModal() {
+            const durasiAwal = this.todayData.durasi_otomatis_menit || 0;
+            this.formEkstensi = {
+                mode: 'otomatis',
+                durasi_menit: durasiAwal,
+                keterangan: '',
+                foto: null
+            };
             this.showEkstensiModal = true;
             this.startGpsWatch(false);
+            if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
+
+            try {
+                const res = await this.safeFetch('{{ route('app.api.lembur.info-shift', [], false) }}');
+                if (res && res.success && res.data) {
+                    this.infoShiftData = res.data;
+                    if (res.data.durasi_otomatis_menit !== undefined && this.formEkstensi.mode === 'otomatis') {
+                        this.formEkstensi.durasi_menit = res.data.durasi_otomatis_menit;
+                    }
+                }
+            } catch (e) {}
             if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
         },
 

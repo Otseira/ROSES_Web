@@ -488,4 +488,65 @@ class MobileWebAttendanceTest extends TestCase
         $this->assertNotEmpty($shifts);
         $this->assertEquals('Shift IGD Pagi', $shifts[0]['nama_shift']);
     }
+
+    public function test_jadwal_dinas_shows_attendance_without_roster_and_delays_lateness_calculation(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-24 07:45:00'));
+
+        // Absen masuk tanpa jadwal dinas
+        LogAbsensi::create([
+            'user_id'          => $this->user->id,
+            'roster_id'        => null,
+            'tanggal_dinas'    => '2026-11-24',
+            'waktu_masuk'      => Carbon::parse('2026-11-24 07:45:00'),
+            'waktu_pulang'     => Carbon::parse('2026-11-24 15:00:00'),
+            'jenis_absen'      => 'luar_jadwal',
+            'menit_terlambat'  => 0,
+            'status_kehadiran' => 'Tanpa Jadwal',
+        ]);
+
+        // Cek halaman jadwal dinas: jam masuk & pulang tetap muncul, belum ada keterlambatan
+        $res = $this->actingAs($this->user)
+            ->getJson('/app/api/jadwal-dinas?bulan=11&tahun=2026')
+            ->assertOk();
+
+        $hari24 = collect($res->json('data.hari'))->firstWhere('tanggal', 24);
+        $this->assertNotNull($hari24);
+        $this->assertEquals('07:45', $hari24['absen_masuk']);
+        $this->assertEquals('15:00', $hari24['absen_pulang']);
+        $this->assertFalse($hari24['has_jadwal']);
+        $this->assertEquals(0, $hari24['terlambat_menit']); // Belum ada jadwal dinas, keterlambatan 0
+
+        // Sekarang admin menginputkan jadwal dinas: Shift Pagi 07:00 - 14:00 (toleransi 5 menit)
+        $shiftPagi = MasterShift::create([
+            'nama_shift'                  => 'Shift Pagi',
+            'jam_masuk'                   => '07:00:00',
+            'jam_pulang'                  => '14:00:00',
+            'toleransi_terlambat_menit'   => 5,
+            'unit_kerja_id'               => $this->user->unit_kerja_id,
+        ]);
+
+        JadwalRoster::create([
+            'user_id'       => $this->user->id,
+            'tanggal_dinas' => '2026-11-24',
+            'shift_id'      => $shiftPagi->id,
+            'sesi'          => 1,
+        ]);
+
+        // Cek kembali halaman jadwal dinas: jadwal sudah di-input, barulah perhitungan keterlambatan bekerja!
+        $resAfter = $this->actingAs($this->user)
+            ->getJson('/app/api/jadwal-dinas?bulan=11&tahun=2026')
+            ->assertOk();
+
+        $hari24After = collect($resAfter->json('data.hari'))->firstWhere('tanggal', 24);
+        $this->assertTrue($hari24After['has_jadwal']);
+        $this->assertEquals('07:45', $hari24After['absen_masuk']);
+        $this->assertEquals('15:00', $hari24After['absen_pulang']);
+        $this->assertEquals('07:00', $hari24After['jam_masuk']);
+        $this->assertEquals('14:00', $hari24After['jam_keluar']);
+        // Jam masuk 07:45, jadwal 07:00 (toleransi 5m) -> terlambat 45 menit
+        $this->assertEquals(45, $hari24After['terlambat_menit']);
+
+        Carbon::setTestNow();
+    }
 }

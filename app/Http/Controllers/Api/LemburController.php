@@ -24,7 +24,7 @@ class LemburController extends Controller
             'latitude'     => 'required|numeric|between:-90,90',
             'longitude'    => 'required|numeric|between:-180,180',
             'foto_masuk'   => 'required|image|mimes:jpeg,png,jpg,webp|max:5120',
-            'durasi_menit' => 'nullable|integer|min:30|max:720',
+            'durasi_menit' => 'nullable|integer|min:15|max:720',
             'accuracy'     => 'nullable|numeric|between:0,10000',
             'is_mock'      => 'nullable|string',
         ]);
@@ -46,65 +46,55 @@ class LemburController extends Controller
             return response()->json(['success' => false, 'message' => 'Anda sudah mengajukan lembur ekstensi untuk hari ini.'], 422);
         }
 
-        // ✅ Sesi aktif = belum absen pulang
+        // Cari sesi dinas aktif (belum pulang) atau sesi dinas hari ini
         $logAktif = LogAbsensi::where('user_id', $user->id)
             ->whereNull('waktu_pulang')
             ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
+            ->latest('waktu_masuk')
             ->first();
 
-        // ✅ Jika TIDAK ada sesi aktif dan hari ini sudah absen pulang → arahkan ke On-Call
-        if (!$logAktif) {
-            $sudahPulang = LogAbsensi::where('user_id', $user->id)
-                ->whereDate('waktu_masuk', $today)
-                ->whereNotNull('waktu_pulang')
-                ->exists();
+        $logDinas = $logAktif ?: LogAbsensi::where('user_id', $user->id)
+            ->whereDate('waktu_masuk', $today)
+            ->latest('waktu_masuk')
+            ->first();
 
-            if ($sudahPulang) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Anda sudah absen pulang hari ini. Untuk tugas tambahan setelah pulang, gunakan menu On-Call.',
-                ], 422);
-            }
-        }
-
-        // ✅ SESI REFERENSI: cari lewat log absen (mendukung shift malam & custom)
-        $roster = $this->rosterReferensiEkstensi($user->id, $now, $logAktif);
-        if (!$roster) {
+        if (!$logDinas || !$logDinas->waktu_masuk) {
             return response()->json([
                 'success' => false,
-                'message' => 'Jadwal dinas tidak ditemukan. Gunakan On-Call untuk hari libur.',
+                'message' => 'Anda belum melakukan absensi masuk kerja hari ini. Absensi lembur memerlukan kehadiran dinas terlebih dahulu.',
             ], 422);
         }
 
-        // ✅ Jam pulang = akhir jendela sesi (akurat untuk shift lintas tengah malam)
-        [, $winEnd] = \App\Http\Controllers\Api\AbsensiController::jendelaSesi($roster);
+        // ✅ ATURAN SELURUH UNIT: Jam dinas karyawan sudah melebihi 6 jam 40 menit (400 menit)
+        $waktuMasuk    = Carbon::parse($logDinas->waktu_masuk);
+        $ambangLembur  = $waktuMasuk->copy()->addMinutes(400); // 6 jam 40 menit
+        $menitBerjalan = $waktuMasuk->diffInMinutes($now);
 
-        if ($now->lessThan($winEnd)) {
+        if ($now->lessThan($ambangLembur)) {
+            $jamBisa = $ambangLembur->format('H:i');
+            $berjalanJam = intdiv($menitBerjalan, 60);
+            $berjalanSisa = $menitBerjalan % 60;
             return response()->json([
                 'success' => false,
-                'message' => 'Lembur ekstensi hanya bisa diajukan setelah jam pulang jadwal (' . $winEnd->format('H:i') . ').',
+                'message' => "Lembur hanya dapat diajukan jika jam dinas sudah melebihi 6 jam 40 menit (dapat diajukan mulai pukul {$jamBisa} WIB). Jam dinas Anda baru berjalan {$berjalanJam} jam {$berjalanSisa} menit.",
             ], 422);
         }
 
-        // Range terkunci: 30 s/d (sekarang − akhir sesi referensi)
-        $maxMenit    = intdiv($now->getTimestamp() - $winEnd->getTimestamp(), 60);
+        // Durasi otomatis: dari setelah 6 jam 40 menit dinas s/d sekarang
+        $durasiOtomatis = max(0, intdiv($now->getTimestamp() - $ambangLembur->getTimestamp(), 60));
+        $maxMenit       = max(15, $durasiOtomatis);
 
-        if ($maxMenit < 30) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Lembur ekstensi baru dapat diajukan minimal 30 menit setelah jam pulang jadwal (' . $winEnd->format('H:i') . ').',
-            ], 422);
-        }
+        $durasiMenit = $request->filled('durasi_menit') && (int) $request->durasi_menit > 0
+            ? (int) $request->durasi_menit
+            : $durasiOtomatis;
 
-        $durasiMenit = $request->filled('durasi_menit') ? (int) $request->durasi_menit : $maxMenit;
-
-        if ($durasiMenit < 30) {
-            return response()->json(['success' => false, 'message' => 'Durasi lembur minimal 30 menit.'], 422);
+        if ($durasiMenit < 15) {
+            return response()->json(['success' => false, 'message' => 'Durasi lembur minimal 15 menit.'], 422);
         }
         if ($durasiMenit > $maxMenit) {
             return response()->json([
                 'success' => false,
-                'message' => "Durasi melebihi batas. Maksimal {$maxMenit} menit (dari akhir sesi s/d sekarang).",
+                'message' => "Durasi melebihi batas jam kerja lembur Anda. Maksimal {$maxMenit} menit (dihitung setelah dinas 6 jam 40 menit s/d sekarang).",
             ], 422);
         }
 
@@ -117,10 +107,15 @@ class LemburController extends Controller
         $path = $file->storeAs('lembur_masuk', 'lembur_' . ($user->nik ?? $user->id) . '_' . time() . '.' . $file->extension(), 'public');
 
         $waktuSelesai = $now;
-        $waktuMulai   = $now->copy()->subMinutes($durasiMenit);
-        $totalJam     = round($durasiMenit / 60, 2);
+        // Jika durasi sama persis dengan durasi otomatis: mulai tepat dari setelah dinas 6 jam 40 menit
+        if ($durasiMenit === $durasiOtomatis) {
+            $waktuMulai = $ambangLembur;
+        } else {
+            $waktuMulai = $now->copy()->subMinutes($durasiMenit);
+        }
+        $totalJam = round($durasiMenit / 60, 2);
 
-        // ✅ AUTO CLOCK-OUT: tutup sesi yang masih aktif (apa pun roster-nya)
+        // ✅ AUTO CLOCK-OUT: tutup sesi dinas reguler jika masih aktif belum absen pulang
         $autoClockOut = false;
         if ($logAktif) {
             $logAktif->waktu_pulang      = $now;
@@ -142,6 +137,9 @@ class LemburController extends Controller
             'latitude_masuk'       => $request->latitude,
             'longitude_masuk'      => $request->longitude,
             'foto_masuk'           => $path,
+            'accuracy_masuk'       => $request->accuracy,
+            'is_mock_masuk'        => $request->filled('is_mock') ? (int) $request->is_mock : 0,
+        ]);
         ]);
 
         return response()->json([
@@ -327,38 +325,60 @@ class LemburController extends Controller
         ], 200);
     }
 
-    /** Info sesi referensi (untuk default durasi ekstensi) — akurat untuk shift malam & custom. */
+    /** Info sesi dinas & ambang lembur 6 jam 40 menit (berlaku untuk seluruh unit). */
     public function infoShiftHariIni(Request $request)
     {
-        $user = $request->user();
-        $now  = Carbon::now();
+        $user  = $request->user();
+        $now   = Carbon::now();
+        $today = $now->toDateString();
 
         $logAktif = LogAbsensi::where('user_id', $user->id)
             ->whereNull('waktu_pulang')
             ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
+            ->latest('waktu_masuk')
             ->first();
 
-        $roster = $this->rosterReferensiEkstensi($user->id, $now, $logAktif);
+        $logDinas = $logAktif ?: LogAbsensi::where('user_id', $user->id)
+            ->whereDate('waktu_masuk', $today)
+            ->latest('waktu_masuk')
+            ->first();
 
-        if (!$roster) {
-            return response()->json(['success' => true, 'data' => null], 200);
+        if (!$logDinas || !$logDinas->waktu_masuk) {
+            return response()->json([
+                'success' => true,
+                'data'    => [
+                    'bisa_ekstensi' => false,
+                    'pesan'         => 'Anda belum melakukan absensi masuk dinas hari ini.',
+                ],
+            ], 200);
         }
 
-        [, $winEnd] = \App\Http\Controllers\Api\AbsensiController::jendelaSesi($roster);
-        $maxMenit   = intdiv($now->getTimestamp() - $winEnd->getTimestamp(), 60);
+        $waktuMasuk    = Carbon::parse($logDinas->waktu_masuk);
+        $ambangLembur  = $waktuMasuk->copy()->addMinutes(400); // 6 jam 40 menit dinas
+        $menitBerjalan = $waktuMasuk->diffInMinutes($now);
+        $bisaEkstensi  = ($now->greaterThanOrEqualTo($ambangLembur));
+        $durasiOtomatis = max(0, intdiv($now->getTimestamp() - $ambangLembur->getTimestamp(), 60));
 
-        $jamMasuk = $roster->custom_jam_masuk ?? ($roster->shift ? (string) $roster->shift->jam_masuk : null);
+        $jamFormat = intdiv($durasiOtomatis, 60);
+        $sisaMenit = $durasiOtomatis % 60;
+        $teksJam   = ($jamFormat > 0 ? "{$jamFormat} Jam " : '') . ($sisaMenit > 0 ? "{$sisaMenit} Menit" : ($jamFormat > 0 ? '' : '0 Menit'));
 
         return response()->json([
             'success' => true,
             'data'    => [
-                'jam_masuk'     => $jamMasuk ? substr((string) $jamMasuk, 0, 5) : null,
-                'jam_pulang'    => $winEnd->format('H:i'),   // ✅ jam pulang SESI yang benar (mis. 07:40)
-                'max_menit'     => max(0, $maxMenit),
-                'min_menit'     => 30,
-                'bisa_ekstensi' => ($maxMenit >= 30),
-                'sesi'          => $roster->sesi,
-                'tanggal'       => Carbon::parse($roster->tanggal_dinas)->format('Y-m-d'),
+                'jam_masuk'             => $waktuMasuk->format('H:i'),
+                'jam_pulang'            => $ambangLembur->format('H:i'),
+                'jam_ambang_lembur'     => $ambangLembur->format('H:i'),
+                'menit_berjalan'        => $menitBerjalan,
+                'max_menit'             => max(15, $durasiOtomatis),
+                'durasi_otomatis_menit' => $durasiOtomatis,
+                'durasi_otomatis_teks'  => trim($teksJam),
+                'min_menit'             => 15,
+                'bisa_ekstensi'         => $bisaEkstensi,
+                'tanggal'               => $waktuMasuk->format('Y-m-d'),
+                'pesan'                 => $bisaEkstensi
+                    ? 'Syarat 6 jam 40 menit dinas terpenuhi. Anda dapat mengajukan lembur.'
+                    : 'Lembur baru dapat diajukan setelah dinas minimal 6 jam 40 menit (mulai ' . $ambangLembur->format('H:i') . ' WIB).',
             ],
         ], 200);
     }
@@ -831,6 +851,36 @@ class LemburController extends Controller
             $fotoProfil = $pathFoto ? url('storage/' . $pathFoto) : null;
         }
 
+        // Format durasi detail: "120 Menit (2 Jam)" atau "100 Menit (1 Jam 40 Menit)"
+        $durasiMenit = (int) round(((float) $l->total_jam_lembur) * 60);
+        $jamFormat   = intdiv($durasiMenit, 60);
+        $sisaMenit   = $durasiMenit % 60;
+        if ($jamFormat > 0 && $sisaMenit > 0) {
+            $jamKurung = "{$jamFormat} Jam {$sisaMenit} Menit";
+        } elseif ($jamFormat > 0) {
+            $jamKurung = "{$jamFormat} Jam";
+        } else {
+            $jamKurung = "{$sisaMenit} Menit";
+        }
+        $durasiDetail = "{$durasiMenit} Menit ({$jamKurung})";
+
+        // Hitung jarak ke RS
+        $pengaturan = PengaturanAplikasi::first();
+        $latLembur  = $l->latitude_masuk ?? $l->latitude_keluar;
+        $lngLembur  = $l->longitude_masuk ?? $l->longitude_keluar;
+        $jarakMeter = null;
+        $jarakTeks  = null;
+        if ($pengaturan && $pengaturan->latitude && $pengaturan->longitude && $latLembur !== null && $lngLembur !== null) {
+            $jarakMeter = round($this->calculateDistance(
+                (float) $pengaturan->latitude,
+                (float) $pengaturan->longitude,
+                (float) $latLembur,
+                (float) $lngLembur
+            ));
+            $maxRadius = $this->getMaxRadius($pengaturan);
+            $jarakTeks = "{$jarakMeter} meter dari RS" . ($jarakMeter <= $maxRadius ? " (Dalam Radius)" : " (Di Luar Radius)");
+        }
+
         return array_merge($l->toArray(), [
             'pegawai_nama' => $nama,
             'pegawai_nik'  => $nik,
@@ -855,9 +905,17 @@ class LemburController extends Controller
 
             'total_jam'     => $l->total_jam_lembur,
             'durasi_jam'    => $l->total_jam_lembur,
-            'durasi_menit'  => (int) round(((float) $l->total_jam_lembur) * 60),
-            'total_menit'   => (int) round(((float) $l->total_jam_lembur) * 60),
+            'durasi_menit'  => $durasiMenit,
+            'total_menit'   => $durasiMenit,
+            'durasi_teks'   => $durasiDetail,
+            'durasi_detail' => $durasiDetail,
             'status'        => $l->status_validasi,
+
+            'alasan'        => $l->keterangan ?? '-',
+            'alasan_lembur' => $l->keterangan ?? '-',
+            'jarak_meter'   => $jarakMeter,
+            'jarak_teks'    => $jarakTeks,
+            'map_url'       => ($latLembur !== null && $lngLembur !== null) ? "https://www.google.com/maps?q={$latLembur},{$lngLembur}" : null,
 
             'foto'            => $l->foto_masuk ? url('storage/' . $l->foto_masuk) : null,
             'foto_masuk_url'  => $l->foto_masuk ? url('storage/' . $l->foto_masuk) : null,
@@ -894,9 +952,17 @@ class LemburController extends Controller
             $fotoProfil = $pathFoto ? url('storage/' . $pathFoto) : null;
         }
 
-        $jamFormat  = intdiv($p->durasi_menit, 60);
-        $sisaMenit  = $p->durasi_menit % 60;
-        $durasiTeks = ($jamFormat > 0 ? "{$jamFormat} jam " : '') . ($sisaMenit > 0 ? "{$sisaMenit} menit" : '');
+        $durasiMenit = (int) $p->durasi_menit;
+        $jamFormat   = intdiv($durasiMenit, 60);
+        $sisaMenit   = $durasiMenit % 60;
+        if ($jamFormat > 0 && $sisaMenit > 0) {
+            $jamKurung = "{$jamFormat} Jam {$sisaMenit} Menit";
+        } elseif ($jamFormat > 0) {
+            $jamKurung = "{$jamFormat} Jam";
+        } else {
+            $jamKurung = "{$sisaMenit} Menit";
+        }
+        $durasiDetail = "{$durasiMenit} Menit ({$jamKurung})";
 
         return array_merge($p->toArray(), [
             'pegawai_nama'        => $nama,
@@ -910,7 +976,8 @@ class LemburController extends Controller
             'nama_unit'           => $unitNama,
             'tanggal'             => $p->tanggal_dinas ? Carbon::parse($p->tanggal_dinas)->format('d/m/Y') : '-',
             'tanggal_iso'         => $p->tanggal_dinas ? Carbon::parse($p->tanggal_dinas)->format('Y-m-d') : null,
-            'durasi_teks'         => trim($durasiTeks) ?: "{$p->durasi_menit} menit",
+            'durasi_teks'         => $durasiDetail,
+            'durasi_detail'       => $durasiDetail,
             'tipe_label'          => $p->tipe_pengambilan === 'masuk_diperlambat' ? 'Jam Masuk Diperlambat' : 'Jam Pulang Dipercepat',
             'status'              => $p->status_validasi,
             'foto_profil'         => $fotoProfil,

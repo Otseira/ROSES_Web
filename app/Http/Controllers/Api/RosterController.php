@@ -148,7 +148,7 @@ class RosterController extends Controller
 
         try {
             foreach ($request->roster_data as $data) {
-                JadwalRoster::updateOrCreate(
+                $roster = JadwalRoster::updateOrCreate(
                     [
                         'user_id'       => $data['user_id'],
                         'tanggal_dinas' => $data['tanggal'],
@@ -157,6 +157,9 @@ class RosterController extends Controller
                         'shift_id'      => $data['shift_id'],
                     ]
                 );
+
+                // Auto-sync absensi jika sebelumnya karyawan sudah absen masuk/pulang sebelum jadwal diinput
+                $this->sinkronkanAbsensiLog((int) $data['user_id'], $data['tanggal'], $roster);
             }
 
             DB::commit();
@@ -171,6 +174,29 @@ class RosterController extends Controller
                 'success' => false,
                 'message' => 'Terjadi kesalahan sistem saat menyimpan jadwal: ' . $e->getMessage(),
             ], 500);
+        }
+    }
+
+    private function sinkronkanAbsensiLog(int $userId, string $tanggal, ?JadwalRoster $roster): void
+    {
+        if ($roster) {
+            [$start, $end] = AbsensiController::jendelaSesi($roster);
+        } else {
+            $start = \Carbon\Carbon::parse($tanggal)->startOfDay();
+            $end   = \Carbon\Carbon::parse($tanggal)->endOfDay();
+        }
+
+        $logs = LogAbsensi::where('user_id', $userId)
+            ->where(function ($q) use ($start, $end, $tanggal) {
+                $q->whereBetween('waktu_masuk', [$start, $end])
+                  ->orWhere('tanggal_dinas', $tanggal);
+            })
+            ->get();
+
+        foreach ($logs as $log) {
+            $log->roster_id = $roster?->id;
+            $log->save();
+            AbsensiController::recalculateStatus($log);
         }
     }
 
@@ -189,6 +215,22 @@ class RosterController extends Controller
             ->whereBetween('tanggal_dinas', [$start->toDateString(), $end->toDateString()])
             ->get()
             ->groupBy(fn($r) => (int) \Carbon\Carbon::parse($r->tanggal_dinas)->day);
+
+        // Ambil seluruh log absensi user di bulan ini
+        // agar jika jadwal dinas belum di-input, absen masuk dan pulang tetap muncul!
+        $logs = \App\Models\LogAbsensi::where('user_id', $user->id)
+            ->where(function ($q) use ($start, $end) {
+                $q->whereBetween('tanggal_dinas', [$start->toDateString(), $end->toDateString()])
+                  ->orWhereBetween('waktu_masuk', [$start, $end]);
+            })
+            ->orderBy('waktu_masuk')
+            ->get()
+            ->groupBy(function ($l) {
+                if ($l->tanggal_dinas) {
+                    return (int) \Carbon\Carbon::parse($l->tanggal_dinas)->day;
+                }
+                return (int) \Carbon\Carbon::parse($l->waktu_masuk)->day;
+            });
 
         $lemburs = LogLembur::where('user_id', $user->id)
             ->where('status_validasi', 'Disetujui')
@@ -217,30 +259,73 @@ class RosterController extends Controller
             $list = $rosters[$d] ?? collect();
             $r1   = $list->firstWhere('sesi', 1) ?? $list->firstWhere('sesi', null);
             $r2   = $list->firstWhere('sesi', 2);
-            $log1 = $r1?->logAbsensi;
-            $log2 = $r2?->logAbsensi;
+            $dayLogs = $logs[$d] ?? collect();
 
-            $shiftNama = $r1?->custom_nama_shift ?? $r1?->shift?->nama_shift;
-            $low = strtolower(trim((string) $shiftNama));
-            $libur = ($r1 === null && $r2 === null) || str_contains($low, 'libur') || $low === 'off';
+            // Sesi 1: Jika ada jadwal ($r1), cari log terkait. Jika belum ada jadwal, ambil log hari itu.
+            $log1 = $r1?->logAbsensi ?? ($r1 ? $dayLogs->firstWhere('roster_id', $r1->id) : null) ?? $dayLogs->first();
+            $log2 = $r2?->logAbsensi ?? ($r2 ? $dayLogs->firstWhere('roster_id', $r2->id) : null) ?? ($dayLogs->count() > 1 ? $dayLogs->get(1) : null);
+
+            // Jika jadwal sudah ada tapi log belum tertaut ke roster_id, sinkronkan & hitung ulang keterlambatan
+            if ($r1 && $log1 && !$log1->roster_id) {
+                $log1->roster_id = $r1->id;
+                $log1->save();
+                \App\Http\Controllers\Api\AbsensiController::recalculateStatus($log1);
+            }
+
+            $hasJadwal = ($r1 !== null);
+            $hasAbsen = ($log1 !== null && ($log1->waktu_masuk !== null || $log1->waktu_pulang !== null));
+
+            if ($hasJadwal) {
+                $shiftNama = $r1->custom_nama_shift ?? $r1->shift?->nama_shift;
+                $low = strtolower(trim((string) $shiftNama));
+                $libur = str_contains($low, 'libur') || $low === 'off';
+                $jamMasuk = $libur ? null : $jam($r1, 'masuk');
+                $jamKeluar = $libur ? null : $jam($r1, 'pulang');
+
+                // ✅ Jika jadwal dinas SUDAH di-input: barulah perhitungan keterlambatan bekerja
+                $terlambatMenit = (int) ($log1?->menit_terlambat ?? 0);
+            } else {
+                // ✅ Jadwal dinas BELUM di-input:
+                // Jam masuk dan jam pulang aktual tetap dimunculkan jika sudah absen
+                $jamMasuk = null;
+                $jamKeluar = null;
+
+                if ($hasAbsen) {
+                    $libur = false;
+                    $shiftNama = 'Belum Ada Jadwal';
+                } else {
+                    $libur = true;
+                    $shiftNama = null;
+                }
+
+                // ✅ Belum ada jadwal dinas: TIDAK dihitung keterlambatan (0 menit)
+                $terlambatMenit = 0;
+            }
+
+            $dayOfWeek = \Carbon\Carbon::createFromDate($tahun, $bulan, $d)->dayOfWeek;
+            $namaHariSingkat = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][$dayOfWeek];
 
             $hari[] = [
                 'tanggal'         => $d,
-                'hari_ke'         => \Carbon\Carbon::createFromDate($tahun, $bulan, $d)->dayOfWeek,
+                'hari_ke'         => $dayOfWeek,
+                'hari_nama'       => $namaHariSingkat,
                 'is_libur'        => $libur,
+                'has_jadwal'      => $hasJadwal,
                 'nama_shift'      => $shiftNama,
-                'jam_masuk'       => $libur ? null : $jam($r1, 'masuk'),
-                'jam_keluar'      => $libur ? null : $jam($r1, 'pulang'),
+                'jam_masuk'       => $jamMasuk,
+                'jam_keluar'      => $jamKeluar,
+                'jam_pulang'      => $jamKeluar,
                 'absen_masuk'     => $log1?->waktu_masuk  ? $fmtHm($log1->waktu_masuk)  : null,
                 'absen_pulang'    => $log1?->waktu_pulang ? $fmtHm($log1->waktu_pulang) : null,
-                'terlambat_menit' => (int) ($log1?->menit_terlambat ?? 0),
+                'terlambat_menit' => $terlambatMenit,
                 'lembur_masuk'    => $masukByDay[$d] ?? null,
                 'lembur_keluar'   => $keluarByDay[$d] ?? null,
-                // ✅ SESI 2 — null bila hari itu hanya 1 shift
+                // ✅ SESI 2
                 'sesi2' => $r2 ? [
                     'nama_shift'      => $r2->custom_nama_shift ?? $r2->shift?->nama_shift,
                     'jam_masuk'       => $jam($r2, 'masuk'),
                     'jam_keluar'      => $jam($r2, 'pulang'),
+                    'jam_pulang'      => $jam($r2, 'pulang'),
                     'absen_masuk'     => $log2?->waktu_masuk  ? $fmtHm($log2->waktu_masuk)  : null,
                     'absen_pulang'    => $log2?->waktu_pulang ? $fmtHm($log2->waktu_pulang) : null,
                     'terlambat_menit' => (int) ($log2?->menit_terlambat ?? 0),

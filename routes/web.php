@@ -109,6 +109,7 @@ Route::prefix('app')->name('app.')->group(function () {
         Route::post('/api/absensi/pulang', [WebMobileController::class, 'clockOut'])->name('api.absensi.pulang');
         Route::get('/api/jadwal-dinas', [WebMobileController::class, 'jadwalDinas'])->name('api.jadwal-dinas');
         Route::get('/api/lembur-data', [WebMobileController::class, 'lemburData'])->name('api.lembur-data');
+        Route::get('/api/lembur/info-shift', [WebMobileController::class, 'infoShift'])->name('api.lembur.info-shift');
         Route::post('/api/lembur/ekstensi', [WebMobileController::class, 'storeEkstensi'])->name('api.lembur.ekstensi');
         Route::post('/api/lembur/oncall-masuk', [WebMobileController::class, 'clockInOnCall'])->name('api.lembur.oncall-masuk');
         Route::post('/api/lembur/oncall-keluar', [WebMobileController::class, 'clockOutOnCall'])->name('api.lembur.oncall-keluar');

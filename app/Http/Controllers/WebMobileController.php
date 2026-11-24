@@ -96,7 +96,14 @@ class WebMobileController extends Controller
      */
     public function index(Request $request)
     {
-        $user = Auth::user()->load('unitKerja');
+        /** @var \App\Models\User|null $user */
+        $user = Auth::user();
+
+        if (!$user) {
+            return redirect()->route('app.login');
+        }
+
+        $user->load('unitKerja');
         $pengaturan = PengaturanAplikasi::first();
 
         // Data awal yang dibawa ke view
@@ -111,7 +118,17 @@ class WebMobileController extends Controller
      */
     public function todayStatus(Request $request): JsonResponse
     {
-        $user = $request->user()->load('unitKerja');
+        /** @var \App\Models\User|null $user */
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        $user->load('unitKerja');
         $now = Carbon::now();
         $today = $now->toDateString();
 
@@ -195,30 +212,45 @@ class WebMobileController extends Controller
                 ];
             });
 
+        // Hitung syarat lembur: dinas sudah melebihi 6 jam 40 menit (400 menit)
+        $waktuMasukCarbon    = $logHariIni?->waktu_masuk ? Carbon::parse($logHariIni->waktu_masuk) : null;
+        $ambangLembur        = $waktuMasukCarbon ? $waktuMasukCarbon->copy()->addMinutes(400) : null;
+        $menitDinas          = $waktuMasukCarbon ? $waktuMasukCarbon->diffInMinutes($now) : 0;
+        $bisaLembur          = $waktuMasukCarbon && ($now->greaterThanOrEqualTo($ambangLembur));
+        $durasiOtomatisMenit = ($bisaLembur && $ambangLembur) ? max(0, intdiv($now->getTimestamp() - $ambangLembur->getTimestamp(), 60)) : 0;
+        $jamFormatOto        = intdiv($durasiOtomatisMenit, 60);
+        $sisaMenitOto        = $durasiOtomatisMenit % 60;
+        $durasiOtomatisTeks  = ($jamFormatOto > 0 ? "{$jamFormatOto} Jam " : '') . ($sisaMenitOto > 0 ? "{$sisaMenitOto} Menit" : ($jamFormatOto > 0 ? '' : '0 Menit'));
+
         return response()->json([
             'success'    => true,
             'csrf_token' => csrf_token(),
             'data'       => [
-                'tanggal'           => $now->translatedFormat('l, d F Y'),
-                'jam_sekarang'      => $now->format('H:i'),
-                'shift_nama'        => $shiftNama,
-                'jam_masuk_jadwal'  => $jamMasukJadwal,
-                'jam_pulang_jadwal' => $jamPulangJadwal,
-                'is_masuk_done'     => $logHariIni && $logHariIni->waktu_masuk !== null,
-                'waktu_masuk'       => $logHariIni?->waktu_masuk ? Carbon::parse($logHariIni->waktu_masuk)->format('H:i') : null,
-                'is_pulang_done'    => $logHariIni && $logHariIni->waktu_pulang !== null,
-                'waktu_pulang'      => $logHariIni?->waktu_pulang ? Carbon::parse($logHariIni->waktu_pulang)->format('H:i') : null,
-                'status_kehadiran'  => $logHariIni?->status_kehadiran,
-                'menit_terlambat'   => $logHariIni?->menit_terlambat ?? 0,
-                'available_shifts'  => $availableShifts,
-                'on_call_aktif'     => $onCallAktif ? [
+                'tanggal'                => $now->translatedFormat('l, d F Y'),
+                'jam_sekarang'           => $now->format('H:i'),
+                'shift_nama'             => $shiftNama,
+                'jam_masuk_jadwal'       => $jamMasukJadwal,
+                'jam_pulang_jadwal'      => $jamPulangJadwal,
+                'is_masuk_done'          => $logHariIni && $logHariIni->waktu_masuk !== null,
+                'waktu_masuk'            => $logHariIni?->waktu_masuk ? Carbon::parse($logHariIni->waktu_masuk)->format('H:i') : null,
+                'jam_ambang_lembur'      => $ambangLembur ? $ambangLembur->format('H:i') : null,
+                'menit_dinas_berjalan'   => $menitDinas,
+                'bisa_lembur'            => $bisaLembur,
+                'durasi_otomatis_menit'  => $durasiOtomatisMenit,
+                'durasi_otomatis_teks'   => trim($durasiOtomatisTeks),
+                'is_pulang_done'         => $logHariIni && $logHariIni->waktu_pulang !== null,
+                'waktu_pulang'           => $logHariIni?->waktu_pulang ? Carbon::parse($logHariIni->waktu_pulang)->format('H:i') : null,
+                'status_kehadiran'       => $logHariIni?->status_kehadiran,
+                'menit_terlambat'        => $logHariIni?->menit_terlambat ?? 0,
+                'available_shifts'       => $availableShifts,
+                'on_call_aktif'          => $onCallAktif ? [
                     'id'           => $onCallAktif->id,
                     'waktu_mulai'  => Carbon::parse($onCallAktif->waktu_mulai_lembur)->format('H:i'),
                     'tanggal_mulai'=> Carbon::parse($onCallAktif->waktu_mulai_lembur)->translatedFormat('d M Y'),
                     'keterangan'   => $onCallAktif->alasan_lembur,
                 ] : null,
-                'bank_jam'          => $bankJam,
-                'can_validasi'      => $user->canValidasi(),
+                'bank_jam'               => $bankJam,
+                'can_validasi'           => $user->canValidasi(),
             ],
         ]);
     }
@@ -355,6 +387,14 @@ class WebMobileController extends Controller
                 'riwayat_ambil_jam' => $riwayatAmbilJam,
             ],
         ]);
+    }
+
+    /**
+     * Info Sesi Dinas & Syarat Lembur 6 Jam 40 Menit
+     */
+    public function infoShift(Request $request): JsonResponse
+    {
+        return (new ApiLemburController())->infoShiftHariIni($request);
     }
 
     /**
