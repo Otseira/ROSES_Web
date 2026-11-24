@@ -549,4 +549,48 @@ class MobileWebAttendanceTest extends TestCase
 
         Carbon::setTestNow();
     }
+
+    public function test_lembur_info_shift_works_with_roster_schedule_and_verifies_6h40m_threshold(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-24 10:00:00'));
+
+        $shiftPagi = MasterShift::create([
+            'nama_shift'                  => 'Shift Pagi',
+            'jam_masuk'                   => '07:00:00',
+            'jam_pulang'                  => '14:00:00',
+            'toleransi_terlambat_menit'   => 5,
+            'unit_kerja_id'               => $this->user->unit_kerja_id,
+        ]);
+
+        JadwalRoster::create([
+            'user_id'       => $this->user->id,
+            'tanggal_dinas' => '2026-11-24',
+            'shift_id'      => $shiftPagi->id,
+            'sesi'          => 1,
+        ]);
+
+        // Belum absen masuk aktual, tapi ada jadwal dinas:
+        // Pukul 10:00 (baru 3 jam berjalan) -> belum mencapai 6 jam 40 menit (13:40)
+        $resEarly = $this->actingAs($this->user)
+            ->getJson('/app/api/lembur/info-shift')
+            ->assertOk();
+
+        $this->assertTrue($resEarly->json('success'));
+        $this->assertEquals('07:00', $resEarly->json('data.jam_masuk'));
+        $this->assertEquals('13:40', $resEarly->json('data.jam_ambang_lembur'));
+        $this->assertFalse($resEarly->json('data.bisa_ekstensi'));
+
+        // Pukul 14:10 (sudah 7 jam 10 menit) -> melewati 6 jam 40 menit (13:40)
+        Carbon::setTestNow(Carbon::parse('2026-11-24 14:10:00'));
+
+        $resReady = $this->actingAs($this->user)
+            ->getJson('/app/api/lembur/info-shift')
+            ->assertOk();
+
+        $this->assertTrue($resReady->json('data.bisa_ekstensi'));
+        // 14:10 - 13:40 = 30 menit
+        $this->assertEquals(30, $resReady->json('data.durasi_otomatis_menit'));
+
+        Carbon::setTestNow();
+    }
 }

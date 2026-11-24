@@ -7,6 +7,7 @@ use App\Models\LogLembur;
 use App\Models\PengambilanLembur;
 use App\Models\LogAbsensi;
 use App\Models\JadwalRoster;
+use App\Models\MasterShift;
 use App\Models\PengaturanAplikasi;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -46,27 +47,53 @@ class LemburController extends Controller
             return response()->json(['success' => false, 'message' => 'Anda sudah mengajukan lembur ekstensi untuk hari ini.'], 422);
         }
 
-        // Cari sesi dinas aktif (belum pulang) atau sesi dinas hari ini
-        $logAktif = LogAbsensi::where('user_id', $user->id)
-            ->whereNull('waktu_pulang')
-            ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
+        // 1. Cari log absensi hari ini (aktif / belum pulang, atau tanggal dinas hari ini, atau waktu_masuk hari ini)
+        $logDinas = LogAbsensi::where('user_id', $user->id)
+            ->where(function ($q) use ($today, $now) {
+                $q->whereNull('waktu_pulang')
+                  ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
+                  ->orWhereDate('tanggal_dinas', $today)
+                  ->orWhereDate('waktu_masuk', $today);
+            })
             ->latest('waktu_masuk')
             ->first();
 
-        $logDinas = $logAktif ?: LogAbsensi::where('user_id', $user->id)
-            ->whereDate('waktu_masuk', $today)
-            ->latest('waktu_masuk')
+        // 2. Cari Jadwal Roster hari ini
+        $roster = JadwalRoster::with('shift')
+            ->where('user_id', $user->id)
+            ->whereDate('tanggal_dinas', $today)
             ->first();
 
-        if (!$logDinas || !$logDinas->waktu_masuk) {
+        if (!$roster) {
+            $kemarin = $now->copy()->subDay()->toDateString();
+            $rosterKemarin = JadwalRoster::with('shift')
+                ->where('user_id', $user->id)
+                ->whereDate('tanggal_dinas', $kemarin)
+                ->first();
+            if ($rosterKemarin && $rosterKemarin->shift && $rosterKemarin->shift->jam_pulang < $rosterKemarin->shift->jam_masuk) {
+                $roster = $rosterKemarin;
+            }
+        }
+
+        $shiftJamMasuk  = $roster?->custom_jam_masuk ?? ($roster?->shift ? (string) $roster->shift->jam_masuk : null);
+        $shiftJamPulang = $roster?->custom_jam_pulang ?? ($roster?->shift ? (string) $roster->shift->jam_pulang : null);
+
+        if (!$logDinas && (!$roster || empty($shiftJamMasuk))) {
             return response()->json([
                 'success' => false,
-                'message' => 'Anda belum melakukan absensi masuk kerja hari ini. Absensi lembur memerlukan kehadiran dinas terlebih dahulu.',
+                'message' => 'Anda belum melakukan absensi masuk kerja dan belum memiliki jadwal dinas hari ini.',
             ], 422);
         }
 
+        // Tentukan jam masuk patokan: utamakan log absensi aktual, bila belum absen gunakan jam masuk dari jadwal dinas
+        if ($logDinas && $logDinas->waktu_masuk) {
+            $waktuMasuk = Carbon::parse($logDinas->waktu_masuk);
+        } else {
+            $tglRoster = $roster->tanggal_dinas ? Carbon::parse($roster->tanggal_dinas)->toDateString() : $today;
+            $waktuMasuk = Carbon::parse($tglRoster . ' ' . $shiftJamMasuk);
+        }
+
         // ✅ ATURAN SELURUH UNIT: Jam dinas karyawan sudah melebihi 6 jam 40 menit (400 menit)
-        $waktuMasuk    = Carbon::parse($logDinas->waktu_masuk);
         $ambangLembur  = $waktuMasuk->copy()->addMinutes(400); // 6 jam 40 menit
         $menitBerjalan = $waktuMasuk->diffInMinutes($now);
 
@@ -139,7 +166,6 @@ class LemburController extends Controller
             'foto_masuk'           => $path,
             'accuracy_masuk'       => $request->accuracy,
             'is_mock_masuk'        => $request->filled('is_mock') ? (int) $request->is_mock : 0,
-        ]);
         ]);
 
         return response()->json([
@@ -332,28 +358,87 @@ class LemburController extends Controller
         $now   = Carbon::now();
         $today = $now->toDateString();
 
-        $logAktif = LogAbsensi::where('user_id', $user->id)
-            ->whereNull('waktu_pulang')
-            ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
+        // 1. Cari log absensi hari ini (aktif / belum pulang, atau tanggal dinas hari ini, atau waktu_masuk hari ini)
+        $logDinas = LogAbsensi::where('user_id', $user->id)
+            ->where(function ($q) use ($today, $now) {
+                $q->whereNull('waktu_pulang')
+                  ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
+                  ->orWhereDate('tanggal_dinas', $today)
+                  ->orWhereDate('waktu_masuk', $today);
+            })
             ->latest('waktu_masuk')
             ->first();
 
-        $logDinas = $logAktif ?: LogAbsensi::where('user_id', $user->id)
-            ->whereDate('waktu_masuk', $today)
-            ->latest('waktu_masuk')
+        // 2. Cari Jadwal Roster hari ini
+        $roster = JadwalRoster::with('shift')
+            ->where('user_id', $user->id)
+            ->whereDate('tanggal_dinas', $today)
             ->first();
 
-        if (!$logDinas || !$logDinas->waktu_masuk) {
+        if (!$roster) {
+            $kemarin = $now->copy()->subDay()->toDateString();
+            $rosterKemarin = JadwalRoster::with('shift')
+                ->where('user_id', $user->id)
+                ->whereDate('tanggal_dinas', $kemarin)
+                ->first();
+            if ($rosterKemarin && $rosterKemarin->shift && $rosterKemarin->shift->jam_pulang < $rosterKemarin->shift->jam_masuk) {
+                $roster = $rosterKemarin;
+            }
+        }
+
+        $shiftJamMasuk  = $roster?->custom_jam_masuk ?? ($roster?->shift ? (string) $roster->shift->jam_masuk : null);
+        $shiftJamPulang = $roster?->custom_jam_pulang ?? ($roster?->shift ? (string) $roster->shift->jam_pulang : null);
+        $shiftNama      = $roster?->custom_nama_shift ?? $roster?->shift?->nama_shift ?? 'Dinas Shift';
+
+        // Daftar Master Shift yang tersedia untuk unit kerja user (kompatibilitas antarmuka)
+        $unitId = $user->unit_kerja_id;
+        $availableShifts = MasterShift::query()
+            ->when($unitId, function ($q) use ($unitId) {
+                $q->where(function ($sub) use ($unitId) {
+                    $sub->where('unit_kerja_id', $unitId)
+                        ->orWhereNull('unit_kerja_id');
+                });
+            })
+            ->whereNotNull('jam_masuk')
+            ->whereNotNull('jam_pulang')
+            ->orderBy('jam_masuk')
+            ->get(['id', 'nama_shift', 'jam_masuk', 'jam_pulang'])
+            ->filter(function ($s) {
+                $low = strtolower(trim($s->nama_shift ?? ''));
+                return $low !== 'off' && !str_contains($low, 'libur');
+            })
+            ->values()
+            ->map(function ($s) {
+                return [
+                    'id'         => $s->id,
+                    'nama_shift' => $s->nama_shift,
+                    'jam_masuk'  => substr((string) $s->jam_masuk, 0, 5),
+                    'jam_pulang' => substr((string) $s->jam_pulang, 0, 5),
+                ];
+            });
+
+        if (!$logDinas && (!$roster || empty($shiftJamMasuk))) {
             return response()->json([
                 'success' => true,
                 'data'    => [
-                    'bisa_ekstensi' => false,
-                    'pesan'         => 'Anda belum melakukan absensi masuk dinas hari ini.',
+                    'roster_ada'       => (bool) $roster,
+                    'available_shifts' => $availableShifts,
+                    'bisa_ekstensi'    => false,
+                    'pesan'            => $roster ? 'Jadwal dinas Anda hari ini adalah Libur / Off.' : 'Anda belum melakukan absensi masuk dinas dan belum memiliki jadwal dinas hari ini.',
                 ],
             ], 200);
         }
 
-        $waktuMasuk    = Carbon::parse($logDinas->waktu_masuk);
+        // Tentukan jam masuk patokan: utamakan log absensi aktual, bila belum absen gunakan jam masuk dari jadwal dinas
+        if ($logDinas && $logDinas->waktu_masuk) {
+            $waktuMasuk = Carbon::parse($logDinas->waktu_masuk);
+            $sumberMasuk = 'aktual';
+        } else {
+            $tglRoster = $roster->tanggal_dinas ? Carbon::parse($roster->tanggal_dinas)->toDateString() : $today;
+            $waktuMasuk = Carbon::parse($tglRoster . ' ' . $shiftJamMasuk);
+            $sumberMasuk = 'jadwal';
+        }
+
         $ambangLembur  = $waktuMasuk->copy()->addMinutes(400); // 6 jam 40 menit dinas
         $menitBerjalan = $waktuMasuk->diffInMinutes($now);
         $bisaEkstensi  = ($now->greaterThanOrEqualTo($ambangLembur));
@@ -366,6 +451,9 @@ class LemburController extends Controller
         return response()->json([
             'success' => true,
             'data'    => [
+                'roster_ada'            => (bool) $roster,
+                'available_shifts'      => $availableShifts,
+                'nama_shift'            => $shiftNama,
                 'jam_masuk'             => $waktuMasuk->format('H:i'),
                 'jam_pulang'            => $ambangLembur->format('H:i'),
                 'jam_ambang_lembur'     => $ambangLembur->format('H:i'),
@@ -375,7 +463,9 @@ class LemburController extends Controller
                 'durasi_otomatis_teks'  => trim($teksJam),
                 'min_menit'             => 15,
                 'bisa_ekstensi'         => $bisaEkstensi,
+                'sumber_masuk'          => $sumberMasuk,
                 'tanggal'               => $waktuMasuk->format('Y-m-d'),
+                'tanggal_dinas'         => $roster?->tanggal_dinas ? Carbon::parse($roster->tanggal_dinas)->toDateString() : $today,
                 'pesan'                 => $bisaEkstensi
                     ? 'Syarat 6 jam 40 menit dinas terpenuhi. Anda dapat mengajukan lembur.'
                     : 'Lembur baru dapat diajukan setelah dinas minimal 6 jam 40 menit (mulai ' . $ambangLembur->format('H:i') . ' WIB).',
