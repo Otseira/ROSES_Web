@@ -250,6 +250,7 @@
                                 <div class="relative group cursor-pointer" onclick="openPhotoModal('{{ $urlMasuk }}', 'Foto Masuk - {{ addslashes($nama) }} ({{ $log->waktu_masuk ? \Carbon\Carbon::parse($log->waktu_masuk)->format('H:i') : '' }})')">
                                     <img src="{{ $urlMasuk }}"
                                         alt="Masuk"
+                                        loading="lazy" decoding="async"
                                         class="w-9 h-9 rounded-lg object-cover border-2 border-emerald-400 shadow-xs hover:scale-110 transition-transform"
                                         onerror="this.onerror=null; this.parentElement.style.display='none';">
                                     <span class="absolute -bottom-1 -right-1 bg-emerald-600 text-white text-[8px] font-black px-1 rounded shadow">IN</span>
@@ -259,6 +260,7 @@
                                 <div class="relative group cursor-pointer" onclick="openPhotoModal('{{ $urlPulang }}', 'Foto Pulang - {{ addslashes($nama) }} ({{ $log->waktu_pulang ? \Carbon\Carbon::parse($log->waktu_pulang)->format('H:i') : '' }})')">
                                     <img src="{{ $urlPulang }}"
                                         alt="Pulang"
+                                        loading="lazy" decoding="async"
                                         class="w-9 h-9 rounded-lg object-cover border-2 border-orange-400 shadow-xs hover:scale-110 transition-transform"
                                         onerror="this.onerror=null; this.parentElement.style.display='none';">
                                     <span class="absolute -bottom-1 -right-1 bg-orange-600 text-white text-[8px] font-black px-1 rounded shadow">OUT</span>

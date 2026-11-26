@@ -50,10 +50,12 @@ class LemburController extends Controller
         // 1. Cari log absensi hari ini (aktif / belum pulang, atau tanggal dinas hari ini, atau waktu_masuk hari ini)
         $logDinas = LogAbsensi::where('user_id', $user->id)
             ->where(function ($q) use ($today, $now) {
-                $q->whereNull('waktu_pulang')
-                  ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
-                  ->orWhereDate('tanggal_dinas', $today)
-                  ->orWhereDate('waktu_masuk', $today);
+                $q->where(function ($sub) use ($now) {
+                    $sub->whereNull('waktu_pulang')
+                        ->where('waktu_masuk', '>=', $now->copy()->subHours(24));
+                })
+                ->orWhereDate('tanggal_dinas', $today)
+                ->orWhereDate('waktu_masuk', $today);
             })
             ->latest('waktu_masuk')
             ->first();
@@ -144,12 +146,13 @@ class LemburController extends Controller
 
         // ✅ AUTO CLOCK-OUT: tutup sesi dinas reguler jika masih aktif belum absen pulang
         $autoClockOut = false;
-        if ($logAktif) {
-            $logAktif->waktu_pulang      = $now;
-            $logAktif->foto_pulang       = $path;
-            $logAktif->latitude_pulang   = $request->latitude;
-            $logAktif->longitude_pulang  = $request->longitude;
-            $logAktif->save();
+        if ($logDinas && is_null($logDinas->waktu_pulang)) {
+            $logDinas->waktu_pulang      = $now;
+            $logDinas->foto_pulang       = $path;
+            $logDinas->latitude_pulang   = $request->latitude;
+            $logDinas->longitude_pulang  = $request->longitude;
+            $logDinas->save();
+            AbsensiController::recalculateStatus($logDinas);
             $autoClockOut = true;
         }
 
@@ -168,10 +171,13 @@ class LemburController extends Controller
             'is_mock_masuk'        => $request->filled('is_mock') ? (int) $request->is_mock : 0,
         ]);
 
+        $responseData = $this->normalizeLembur($lembur->load('user.unitKerja'));
+        $responseData['auto_clock_out'] = $autoClockOut;
+
         return response()->json([
             'success' => true,
             'message' => ($autoClockOut ? '✓ Absen pulang tercatat otomatis. ' : '') . '✓ Lembur ekstensi berhasil disimpan.',
-            'data'    => $this->normalizeLembur($lembur->load('user.unitKerja')),
+            'data'    => $responseData,
         ], 200);
     }
 
@@ -300,24 +306,22 @@ class LemburController extends Controller
         $file = $request->file('foto_keluar');
         $path = $file->storeAs('oncall_keluar', 'oncall_keluar_' . ($user->nik ?? $user->id) . '_' . time() . '.' . $file->extension(), 'public');
 
-        // ✅ AUTO CLOCK-OUT sesi terakhir (jika belum ada)
-        $today  = $now->toDateString();
-        $rosterTerakhir = JadwalRoster::where('user_id', $user->id)
-            ->where('tanggal_dinas', $today)
-            ->orderBy('sesi', 'desc')
+        // ✅ AUTO CLOCK-OUT sesi dinas aktif (jika belum absen pulang)
+        $logAbsen = LogAbsensi::where('user_id', $user->id)
+            ->whereNull('waktu_pulang')
+            ->where('waktu_masuk', '>=', $now->copy()->subHours(36))
+            ->latest('waktu_masuk')
             ->first();
 
         $autoClockOut = false;
-        if ($rosterTerakhir) {
-            $logAbsen = LogAbsensi::where('roster_id', $rosterTerakhir->id)->whereNull('waktu_pulang')->first();
-            if ($logAbsen) {
-                $logAbsen->waktu_pulang      = $now;
-                $logAbsen->foto_pulang       = $path;
-                $logAbsen->latitude_pulang   = $request->latitude;
-                $logAbsen->longitude_pulang  = $request->longitude;
-                $logAbsen->save();
-                $autoClockOut = true;
-            }
+        if ($logAbsen) {
+            $logAbsen->waktu_pulang      = $now;
+            $logAbsen->foto_pulang       = $path;
+            $logAbsen->latitude_pulang   = $request->latitude;
+            $logAbsen->longitude_pulang  = $request->longitude;
+            $logAbsen->save();
+            AbsensiController::recalculateStatus($logAbsen);
+            $autoClockOut = true;
         }
 
         $lembur->update([
@@ -328,10 +332,13 @@ class LemburController extends Controller
             'foto_keluar'          => $path,
         ]);
 
+        $responseData = $this->normalizeLembur($lembur->load('user.unitKerja'));
+        $responseData['auto_clock_out'] = $autoClockOut;
+
         return response()->json([
             'success' => true,
             'message' => ($autoClockOut ? '✓ Absen pulang tercatat otomatis. ' : '') . '✓ On-Call selesai dicatat.',
-            'data'    => $this->normalizeLembur($lembur->load('user.unitKerja')),
+            'data'    => $responseData,
         ], 200);
     }
 
@@ -361,10 +368,12 @@ class LemburController extends Controller
         // 1. Cari log absensi hari ini (aktif / belum pulang, atau tanggal dinas hari ini, atau waktu_masuk hari ini)
         $logDinas = LogAbsensi::where('user_id', $user->id)
             ->where(function ($q) use ($today, $now) {
-                $q->whereNull('waktu_pulang')
-                  ->where('waktu_masuk', '>=', $now->copy()->subHours(24))
-                  ->orWhereDate('tanggal_dinas', $today)
-                  ->orWhereDate('waktu_masuk', $today);
+                $q->where(function ($sub) use ($now) {
+                    $sub->whereNull('waktu_pulang')
+                        ->where('waktu_masuk', '>=', $now->copy()->subHours(24));
+                })
+                ->orWhereDate('tanggal_dinas', $today)
+                ->orWhereDate('waktu_masuk', $today);
             })
             ->latest('waktu_masuk')
             ->first();
@@ -553,6 +562,7 @@ class LemburController extends Controller
         $raw  = $request->input('status')
             ?? $request->input('status_validasi')
             ?? $request->input('action')
+            ?? $request->input('aksi')
             ?? $request->input('nilai');
         $norm = strtolower(trim((string) $raw));
 
@@ -648,24 +658,39 @@ class LemburController extends Controller
         $sisaMenitTersedia = $saldoTersediaMenit % 60;
         $teksSaldoTersedia = ($jamTersedia > 0 ? "{$jamTersedia} jam " : '') . "{$sisaMenitTersedia} menit";
 
+        $fmtDurasi = function (int $mnt): string {
+            $j = intdiv($mnt, 60);
+            $m = $mnt % 60;
+            if ($j > 0 && $m > 0) return "{$j} Jam {$m} Menit";
+            if ($j > 0) return "{$j} Jam";
+            return "{$m} Menit";
+        };
+        $teksSaldoJam     = $fmtDurasi($saldoTersediaMenit);
+        $teksDiperoleh    = $fmtDurasi($earnedMinutes);
+        $teksDigunakan    = $fmtDurasi($usedMinutes);
+
         return response()->json([
             'success' => true,
             'data'    => [
-                'is_ganti_jam'           => ($user->unitKerja?->jenis_lembur ?? 'dibayar') === 'ganti_jam',
-                'kebijakan_lembur'       => $user->unitKerja?->jenis_lembur ?? 'dibayar',
-                'unit_nama'              => $user->unitKerja?->nama_unit ?? '-',
-                'saldo_awal_menit'       => $saldoAwalMenit,
-                'menit_lembur_aplikasi'  => $menitLemburAplikasi,
-                'keterangan_saldo'       => $user->keterangan_saldo_lembur,
-                'updated_saldo_by'       => $user->updatedSaldoBy?->name,
-                'updated_saldo_at'       => optional($user->updated_saldo_lembur_at)->format('d/m/Y H:i'),
-                'total_menit_diperoleh'  => $earnedMinutes,
-                'total_menit_digunakan'  => $usedMinutes,
-                'total_menit_pending'    => $pendingMinutes,
-                'saldo_menit_bersih'     => $saldoBersihMenit,
-                'saldo_menit_tersedia'   => $saldoTersediaMenit,
-                'saldo_bersih_teks'      => trim($teksSaldoBersih) ?: '0 menit',
-                'saldo_tersedia_teks'    => trim($teksSaldoTersedia) ?: '0 menit',
+                'is_ganti_jam'               => ($user->unitKerja?->jenis_lembur ?? 'dibayar') === 'ganti_jam',
+                'kebijakan_lembur'           => $user->unitKerja?->jenis_lembur ?? 'dibayar',
+                'unit_nama'                  => $user->unitKerja?->nama_unit ?? '-',
+                'saldo_awal_menit'           => $saldoAwalMenit,
+                'menit_lembur_aplikasi'      => $menitLemburAplikasi,
+                'keterangan_saldo'           => $user->keterangan_saldo_lembur,
+                'updated_saldo_by'           => $user->updatedSaldoBy?->name,
+                'updated_saldo_at'           => optional($user->updated_saldo_lembur_at)->format('d/m/Y H:i'),
+                'total_menit_diperoleh'      => $earnedMinutes,
+                'total_menit_digunakan'      => $usedMinutes,
+                'total_menit_pending'        => $pendingMinutes,
+                'saldo_menit_bersih'         => $saldoBersihMenit,
+                'saldo_menit_tersedia'       => $saldoTersediaMenit,
+                'saldo_bersih_teks'          => trim($teksSaldoBersih) ?: '0 menit',
+                'saldo_tersedia_teks'        => trim($teksSaldoTersedia) ?: '0 menit',
+                // Alias kompatibilitas untuk Web Mobile & Flutter
+                'saldo_jam_teks'             => $teksSaldoJam,
+                'total_lembur_disetujui_teks'=> $teksDiperoleh,
+                'total_pengambilan_teks'     => $teksDigunakan,
             ],
         ], 200);
     }
@@ -675,6 +700,13 @@ class LemburController extends Controller
      */
     public function storePengambilanJam(Request $request)
     {
+        // Normalisasi alias field dari Web Mobile maupun Flutter sirom
+        $request->merge([
+            'tanggal_dinas'    => $request->input('tanggal_dinas') ?? $request->input('tanggal_rencana'),
+            'keterangan'       => $request->input('keterangan') ?? $request->input('alasan'),
+            'tipe_pengambilan' => $request->input('tipe_pengambilan') ?: 'pulang_dipercepat',
+        ]);
+
         $request->validate([
             'tanggal_dinas'    => 'required|date|after_or_equal:today',
             'tipe_pengambilan' => 'required|in:masuk_diperlambat,pulang_dipercepat',
@@ -691,12 +723,14 @@ class LemburController extends Controller
             ], 422);
         }
 
-        // Hitung saldo tersedia
-        $earnedMinutes = (int) round(
+        // Hitung saldo tersedia (konsisten dengan getBankJam: Saldo Awal + Lembur Aplikasi - Terpakai - Pending)
+        $saldoAwalMenit = (int) ($user->saldo_awal_lembur_menit ?? 0);
+        $menitLemburAplikasi = (int) round(
             LogLembur::where('user_id', $user->id)
                 ->where('status_validasi', 'Disetujui')
                 ->sum('total_jam_lembur') * 60
         );
+        $earnedMinutes = $saldoAwalMenit + $menitLemburAplikasi;
         $usedMinutes = (int) PengambilanLembur::where('user_id', $user->id)
             ->where('status_validasi', 'Disetujui')
             ->sum('durasi_menit');
@@ -826,6 +860,7 @@ class LemburController extends Controller
         $raw  = $request->input('status')
             ?? $request->input('status_validasi')
             ?? $request->input('action')
+            ?? $request->input('aksi')
             ?? $request->input('nilai');
         $norm = strtolower(trim((string) $raw));
 
@@ -1065,7 +1100,9 @@ class LemburController extends Controller
             'unit_kerja'          => $unitNama,
             'nama_unit'           => $unitNama,
             'tanggal'             => $p->tanggal_dinas ? Carbon::parse($p->tanggal_dinas)->format('d/m/Y') : '-',
+            'tanggal_rencana'     => $p->tanggal_dinas ? Carbon::parse($p->tanggal_dinas)->format('d/m/Y') : '-',
             'tanggal_iso'         => $p->tanggal_dinas ? Carbon::parse($p->tanggal_dinas)->format('Y-m-d') : null,
+            'alasan'              => $p->keterangan ?? '-',
             'durasi_teks'         => $durasiDetail,
             'durasi_detail'       => $durasiDetail,
             'tipe_label'          => $p->tipe_pengambilan === 'masuk_diperlambat' ? 'Jam Masuk Diperlambat' : 'Jam Pulang Dipercepat',

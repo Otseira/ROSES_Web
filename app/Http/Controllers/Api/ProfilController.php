@@ -42,11 +42,16 @@ class ProfilController extends Controller
         if ($request->has('nik')) {
             $user->nik = $request->nik;
         }
-
-        $user->name           = $request->nama;
-        $user->username       = $request->username;
-        $user->email          = $request->email;
-        $user->nomor_whatsapp = $request->nomor_whatsapp;
+        if ($request->filled('nama')) {
+            $user->name = $request->nama;
+        }
+        $user->username = $request->username;
+        if ($request->has('email')) {
+            $user->email = $request->email;
+        }
+        if ($request->has('nomor_whatsapp')) {
+            $user->nomor_whatsapp = $request->nomor_whatsapp;
+        }
         $user->save();
 
         $user->load('unitKerja');

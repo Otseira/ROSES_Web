@@ -414,9 +414,75 @@ class WebLaporanController extends Controller
         return $ids;
     }
 
+    /**
+     * Resolusi ID pegawai berdasarkan filter unit / hak akses dalam 1 query ringan
+     * agar query log_absensis & log_lemburs memakai IN (...) alih-alih nested whereHas().
+     * Mengembalikan null jika global tanpa filter unit.
+     */
+    private function resolveScopedUserIds($unit = null, ?array $allowedUnitIds = null): ?array
+    {
+        if (empty($unit) && $allowedUnitIds === null) {
+            return null;
+        }
+
+        if ($allowedUnitIds !== null && empty($allowedUnitIds)) {
+            return [];
+        }
+
+        return User::query()
+            ->when($unit, fn($q) => $q->where('unit_kerja_id', $unit))
+            ->when($allowedUnitIds !== null, fn($q) => $q->whereIn('unit_kerja_id', $allowedUnitIds))
+            ->pluck('id')
+            ->all();
+    }
+
+    /**
+     * Agregasi Bank Jam per user dalam 2 query GROUP BY (menggantikan N+1 3 query per pegawai).
+     */
+    private function aggregateBankJamMetrics(array $userIds): array
+    {
+        if (empty($userIds)) {
+            return ['lembur' => [], 'used' => [], 'pending' => []];
+        }
+
+        $lemburByUser = LogLembur::whereIn('user_id', $userIds)
+            ->where('status_validasi', 'Disetujui')
+            ->selectRaw('user_id, COALESCE(SUM(total_jam_lembur), 0) as total_jam')
+            ->groupBy('user_id')
+            ->pluck('total_jam', 'user_id')
+            ->all();
+
+        $ambilRows = PengambilanLembur::whereIn('user_id', $userIds)
+            ->whereIn('status_validasi', ['Disetujui', 'Pending'])
+            ->selectRaw('user_id, status_validasi, COALESCE(SUM(durasi_menit), 0) as total_menit')
+            ->groupBy('user_id', 'status_validasi')
+            ->get();
+
+        $usedByUser = [];
+        $pendingByUser = [];
+        foreach ($ambilRows as $row) {
+            if ($row->status_validasi === 'Disetujui') {
+                $usedByUser[$row->user_id] = (int) $row->total_menit;
+            } else {
+                $pendingByUser[$row->user_id] = (int) $row->total_menit;
+            }
+        }
+
+        return [
+            'lembur'  => $lemburByUser,
+            'used'    => $usedByUser,
+            'pending' => $pendingByUser,
+        ];
+    }
+
     private function buildData(string $startDate, string $endDate, $unit = null, ?array $allowedUnitIds = null)
     {
-        $pengaturan = PengaturanAplikasi::first();
+        $scopedUserIds = $this->resolveScopedUserIds($unit, $allowedUnitIds);
+        if ($scopedUserIds !== null && empty($scopedUserIds)) {
+            return [collect(), collect()];
+        }
+
+        $pengaturan = PengaturanAplikasi::select(['latitude', 'longitude'])->first();
         $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
         $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
 
@@ -435,18 +501,7 @@ class WebLaporanController extends Controller
                 'roster.shift:id,nama_shift,jam_masuk,jam_pulang,toleransi_terlambat_menit'
             ])
             ->whereBetween('waktu_masuk', [$startDate, $endDate])
-            ->when($unit, function ($q) use ($unit) {
-                $q->where(function ($q2) use ($unit) {
-                    $q2->whereHas('roster.user', fn($u) => $u->where('unit_kerja_id', $unit))
-                        ->orWhereHas('user', fn($u) => $u->where('unit_kerja_id', $unit));
-                });
-            })
-            ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {
-                $q->where(function ($q2) use ($allowedUnitIds) {
-                    $q2->whereHas('roster.user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds))
-                        ->orWhereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
-                });
-            })
+            ->when($scopedUserIds !== null, fn($q) => $q->whereIn('user_id', $scopedUserIds))
             ->orderBy('waktu_masuk')
             ->get()
             ->map(function ($log) use ($lat, $lng) {
@@ -478,12 +533,9 @@ class WebLaporanController extends Controller
                 'total_jam_lembur', 'status_validasi'
             ])
             ->with(['user:id,name,nik,unit_kerja_id'])
-            ->where('status_validasi', 'Disetujui')   // ✅ filter utama
+            ->where('status_validasi', 'Disetujui')
             ->whereBetween('waktu_mulai_lembur', [$startDate, $endDate])
-            ->when($unit, fn($q) => $q->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unit)))
-            ->when($allowedUnitIds !== null, function ($q) use ($allowedUnitIds) {
-                $q->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
-            })
+            ->when($scopedUserIds !== null, fn($q) => $q->whereIn('user_id', $scopedUserIds))
             ->orderBy('waktu_mulai_lembur')
             ->get()
             ->groupBy(fn($l) => $l->user_id . '|' . $l->waktu_mulai_lembur->toDateString());
@@ -563,21 +615,19 @@ class WebLaporanController extends Controller
         $lat = $pengaturan ? (float) $pengaturan->latitude : 0;
         $lng = $pengaturan ? (float) $pengaturan->longitude : 0;
 
+        $scopedUserIds = $this->resolveScopedUserIds($unitFilter, $allowedUnitIds);
+        $dibayarUserIds = User::query()
+            ->whereHas('unitKerja', fn($u) => $u->where('jenis_lembur', 'dibayar'))
+            ->when($scopedUserIds !== null, fn($q) => empty($scopedUserIds) ? $q->whereRaw('1 = 0') : $q->whereIn('id', $scopedUserIds))
+            ->pluck('id')
+            ->all();
+
         // ==========================================
         // 1. DATA TAB 1: LEMBUR BERBAYAR (PAYROLL)
         // ==========================================
         $qDibayar = LogLembur::query()
             ->whereBetween('waktu_mulai_lembur', [$start, $end])
-            ->whereHas('user.unitKerja', function ($u) {
-                $u->where('jenis_lembur', 'dibayar');
-            });
-
-        if ($allowedUnitIds !== null) {
-            $qDibayar->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
-        }
-        if (!empty($unitFilter)) {
-            $qDibayar->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unitFilter));
-        }
+            ->when(empty($dibayarUserIds), fn($q) => $q->whereRaw('1 = 0'), fn($q) => $q->whereIn('user_id', $dibayarUserIds));
 
         // Stats Dibayar
         $statsDibayar = (clone $qDibayar)->selectRaw("
@@ -636,27 +686,19 @@ class WebLaporanController extends Controller
             $qBankJam->where('unit_kerja_id', $unitFilter);
         }
 
-        $usersBankJam = $qBankJam->with(['unitKerja', 'updatedSaldoBy'])->orderBy('name', 'asc')->get();
+        $usersBankJam = $qBankJam->with(['unitKerja:id,nama_unit', 'updatedSaldoBy:id,name'])->orderBy('name', 'asc')->get();
+        $bankJamAgg = $this->aggregateBankJamMetrics($usersBankJam->pluck('id')->all());
 
-        $rowsBankJam = $usersBankJam->map(function ($u) {
+        $rowsBankJam = $usersBankJam->map(function ($u) use ($bankJamAgg) {
             $saldoAwalMenit = (int) ($u->saldo_awal_lembur_menit ?? 0);
-            $menitLemburAplikasi = (int) round(
-                LogLembur::where('user_id', $u->id)
-                    ->where('status_validasi', 'Disetujui')
-                    ->sum('total_jam_lembur') * 60
-            );
+            $menitLemburAplikasi = (int) round(((float) ($bankJamAgg['lembur'][$u->id] ?? 0)) * 60);
 
             // Total perolehan sepanjang masa = Saldo Awal/Manual + Lembur Aplikasi
             $menitDiperoleh = $saldoAwalMenit + $menitLemburAplikasi;
 
             // Total yang sudah diambil sepanjang masa
-            $menitDigunakan = (int) PengambilanLembur::where('user_id', $u->id)
-                ->where('status_validasi', 'Disetujui')
-                ->sum('durasi_menit');
-
-            $menitPending = (int) PengambilanLembur::where('user_id', $u->id)
-                ->where('status_validasi', 'Pending')
-                ->sum('durasi_menit');
+            $menitDigunakan = (int) ($bankJamAgg['used'][$u->id] ?? 0);
+            $menitPending   = (int) ($bankJamAgg['pending'][$u->id] ?? 0);
 
             $saldoBersihMenit   = max(0, $menitDiperoleh - $menitDigunakan);
             $saldoTersediaMenit = max(0, $saldoBersihMenit - $menitPending);
@@ -693,11 +735,12 @@ class WebLaporanController extends Controller
         $qPengambilan = PengambilanLembur::query()
             ->whereBetween('tanggal_dinas', [$start->toDateString(), $end->toDateString()]);
 
-        if ($allowedUnitIds !== null) {
-            $qPengambilan->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
-        }
-        if (!empty($unitFilter)) {
-            $qPengambilan->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unitFilter));
+        if ($scopedUserIds !== null) {
+            $qPengambilan->when(
+                empty($scopedUserIds),
+                fn($q) => $q->whereRaw('1 = 0'),
+                fn($q) => $q->whereIn('user_id', $scopedUserIds)
+            );
         }
 
         // Stats Pengambilan
@@ -870,17 +913,17 @@ class WebLaporanController extends Controller
         $namaBulan = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
         $periodLabel = ($namaBulan[$bulan] ?? $bulan) . ' ' . $tahun;
 
+        $scopedUserIds = $this->resolveScopedUserIds($unitFilter, $allowedUnitIds);
+        $dibayarUserIds = User::query()
+            ->whereHas('unitKerja', fn($u) => $u->where('jenis_lembur', 'dibayar'))
+            ->when($scopedUserIds !== null, fn($q) => empty($scopedUserIds) ? $q->whereRaw('1 = 0') : $q->whereIn('id', $scopedUserIds))
+            ->pluck('id')
+            ->all();
+
         // 1. Data Lembur Dibayar
         $qDibayar = LogLembur::query()
             ->whereBetween('waktu_mulai_lembur', [$start, $end])
-            ->whereHas('user.unitKerja', fn($u) => $u->where('jenis_lembur', 'dibayar'));
-
-        if ($allowedUnitIds !== null) {
-            $qDibayar->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
-        }
-        if (!empty($unitFilter)) {
-            $qDibayar->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unitFilter));
-        }
+            ->when(empty($dibayarUserIds), fn($q) => $q->whereRaw('1 = 0'), fn($q) => $q->whereIn('user_id', $dibayarUserIds));
 
         $dataDibayar = $qDibayar->with('user.unitKerja')
             ->orderByDesc('waktu_mulai_lembur')
@@ -914,18 +957,15 @@ class WebLaporanController extends Controller
             $qBankJam->where('unit_kerja_id', $unitFilter);
         }
 
-        $dataBankJam = $qBankJam->with('unitKerja')->orderBy('name', 'asc')->get()
-            ->map(function ($u) {
+        $usersBankJamExport = $qBankJam->with('unitKerja:id,nama_unit')->orderBy('name', 'asc')->get();
+        $bankJamExportAgg   = $this->aggregateBankJamMetrics($usersBankJamExport->pluck('id')->all());
+
+        $dataBankJam = $usersBankJamExport
+            ->map(function ($u) use ($bankJamExportAgg) {
                 $saldoAwalMenit = (int) ($u->saldo_awal_lembur_menit ?? 0);
-                $menitLemburAplikasi = (int) round(
-                    LogLembur::where('user_id', $u->id)
-                        ->where('status_validasi', 'Disetujui')
-                        ->sum('total_jam_lembur') * 60
-                );
+                $menitLemburAplikasi = (int) round(((float) ($bankJamExportAgg['lembur'][$u->id] ?? 0)) * 60);
                 $menitDiperoleh = $saldoAwalMenit + $menitLemburAplikasi;
-                $menitDigunakan = (int) PengambilanLembur::where('user_id', $u->id)
-                    ->where('status_validasi', 'Disetujui')
-                    ->sum('durasi_menit');
+                $menitDigunakan = (int) ($bankJamExportAgg['used'][$u->id] ?? 0);
 
                 $saldoBersihMenit = max(0, $menitDiperoleh - $menitDigunakan);
 
@@ -947,11 +987,12 @@ class WebLaporanController extends Controller
         $qPengambilan = PengambilanLembur::query()
             ->whereBetween('tanggal_dinas', [$start->toDateString(), $end->toDateString()]);
 
-        if ($allowedUnitIds !== null) {
-            $qPengambilan->whereHas('user', fn($u) => $u->whereIn('unit_kerja_id', $allowedUnitIds));
-        }
-        if (!empty($unitFilter)) {
-            $qPengambilan->whereHas('user', fn($u) => $u->where('unit_kerja_id', $unitFilter));
+        if ($scopedUserIds !== null) {
+            $qPengambilan->when(
+                empty($scopedUserIds),
+                fn($q) => $q->whereRaw('1 = 0'),
+                fn($q) => $q->whereIn('user_id', $scopedUserIds)
+            );
         }
 
         $dataPengambilan = $qPengambilan->with(['user.unitKerja', 'validator'])

@@ -70,7 +70,7 @@ class RosterController extends Controller
 
         $staf = $stafQuery->select(['id', 'nik', 'name', 'unit_kerja_id'])
             ->with(['rosters' => function ($query) use ($bulan, $tahun) {
-                $query->select(['id', 'user_id', 'shift_id', 'tanggal_dinas'])
+                $query->select(['id', 'user_id', 'shift_id', 'tanggal_dinas', 'sesi', 'custom_nama_shift', 'custom_jam_masuk', 'custom_jam_pulang'])
                     ->whereMonth('tanggal_dinas', $bulan)
                     ->whereYear('tanggal_dinas', $tahun)
                     ->with('shift:id,nama_shift,jam_masuk,jam_pulang');
@@ -93,12 +93,17 @@ class RosterController extends Controller
                         'nama' => $employee->name,
                         'unit_kerja_id' => $employee->unit_kerja_id, // Berguna untuk frontend mengelompokkan
                         'jadwal' => $employee->rosters->map(function ($r) {
+                            $namaShift = $r->custom_nama_shift ?? $r->shift?->nama_shift ?? '-';
+                            $jm = $r->jam_masuk ? substr((string) $r->jam_masuk, 0, 5) : '-';
+                            $jp = $r->jam_pulang ? substr((string) $r->jam_pulang, 0, 5) : '-';
                             return [
-                                'roster_id' => $r->id,
-                                'tanggal' => $r->tanggal_dinas,
-                                'shift_id' => $r->shift_id,
-                                'nama_shift' => $r->shift->nama_shift,
-                                'jam_kerja' => $r->shift->jam_masuk . ' - ' . $r->shift->jam_pulang,
+                                'roster_id'  => $r->id,
+                                'tanggal'    => $r->tanggal_dinas ? Carbon::parse($r->tanggal_dinas)->format('Y-m-d') : null,
+                                'shift_id'   => $r->shift_id,
+                                'nama_shift' => $namaShift,
+                                'jam_masuk'  => $jm,
+                                'jam_pulang' => $jp,
+                                'jam_kerja'  => $jm . ' - ' . $jp,
                             ];
                         })
                     ];

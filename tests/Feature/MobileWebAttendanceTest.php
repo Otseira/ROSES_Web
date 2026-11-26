@@ -154,8 +154,15 @@ class MobileWebAttendanceTest extends TestCase
             $table->text('alasan_lembur')->nullable();
             $table->decimal('latitude_masuk', 10, 8)->nullable();
             $table->decimal('longitude_masuk', 11, 8)->nullable();
+            $table->decimal('latitude_keluar', 10, 8)->nullable();
+            $table->decimal('longitude_keluar', 11, 8)->nullable();
             $table->string('foto_masuk')->nullable();
             $table->string('foto_keluar')->nullable();
+            $table->decimal('accuracy_masuk', 8, 2)->nullable();
+            $table->boolean('is_mock_masuk')->default(false);
+            $table->unsignedBigInteger('divalidasi_oleh')->nullable();
+            $table->timestamp('divalidasi_pada')->nullable();
+            $table->string('catatan_validasi')->nullable();
             $table->timestamps();
         });
 
@@ -168,6 +175,15 @@ class MobileWebAttendanceTest extends TestCase
             $table->text('keterangan')->nullable();
             $table->string('status_validasi')->default('Pending');
             $table->unsignedBigInteger('divalidasi_oleh')->nullable();
+            $table->timestamp('divalidasi_pada')->nullable();
+            $table->string('catatan_validasi')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('unit_kerja_users', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('master_unit_kerja_id');
             $table->timestamps();
         });
     }
@@ -590,6 +606,318 @@ class MobileWebAttendanceTest extends TestCase
         $this->assertTrue($resReady->json('data.bisa_ekstensi'));
         // 14:10 - 13:40 = 30 menit
         $this->assertEquals(30, $resReady->json('data.durasi_otomatis_menit'));
+
+        Carbon::setTestNow();
+    }
+
+    public function test_store_ekstensi_auto_clocks_out_active_log_without_undefined_variable(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-26 21:39:00'));
+
+        // Log absensi masuk pukul 08:03:00 (belum absen pulang) -> 6j 40m = 14:43:00
+        // 14:43:00 s/d 21:39:00 = 416 menit (6 jam 56 menit)
+        $logDinas = LogAbsensi::create([
+            'user_id'          => $this->user->id,
+            'tanggal_dinas'    => '2026-11-26',
+            'waktu_masuk'      => Carbon::parse('2026-11-26 08:03:00'),
+            'jenis_absen'      => 'luar_jadwal',
+            'menit_terlambat'  => 0,
+            'status_kehadiran' => 'Tanpa Jadwal',
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->post('/app/api/lembur/ekstensi', [
+                'durasi_menit' => 416,
+                'keterangan'   => 'ekspo AKREDITASI dari jam 8 lanjut shift sore jam 3-21.40',
+                'latitude'     => -0.947110,
+                'longitude'    => 100.417180,
+                'accuracy'     => 15,
+                'foto_masuk'   => UploadedFile::fake()->image('lembur.jpg'),
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.auto_clock_out', true)
+            ->assertJsonPath('data.durasi_menit', 416);
+
+        $logDinas->refresh();
+        $this->assertNotNull($logDinas->waktu_pulang);
+        $this->assertEquals('2026-11-26 21:39:00', $logDinas->waktu_pulang->format('Y-m-d H:i:s'));
+
+        Carbon::setTestNow();
+    }
+
+    public function test_oncall_masuk_today_status_and_keluar_flow(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-26 20:00:00'));
+
+        // On-Call Masuk
+        $resIn = $this->actingAs($this->user)
+            ->post('/app/api/lembur/oncall-masuk', [
+                'keterangan' => 'Operasi Cito Bedah',
+                'latitude'   => -0.947110,
+                'longitude'  => 100.417180,
+                'accuracy'   => 12,
+                'foto_masuk' => UploadedFile::fake()->image('oncall_in.jpg'),
+            ]);
+        $resIn->assertOk()->assertJsonPath('success', true);
+
+        // Today Status harus menampilkan keterangan On-Call dengan benar (bukan null)
+        $statusRes = $this->actingAs($this->user)
+            ->getJson('/app/api/today-status')
+            ->assertOk();
+        $this->assertEquals('Operasi Cito Bedah', $statusRes->json('data.on_call_aktif.keterangan'));
+
+        // On-Call Keluar setelah 45 menit
+        Carbon::setTestNow(Carbon::parse('2026-11-26 20:45:00'));
+        $resOut = $this->actingAs($this->user)
+            ->post('/app/api/lembur/oncall-keluar', [
+                'latitude'    => -0.947110,
+                'longitude'   => 100.417180,
+                'accuracy'    => 12,
+                'foto_keluar' => UploadedFile::fake()->image('oncall_out.jpg'),
+            ]);
+        $resOut->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.durasi_menit', 45)
+            ->assertJsonPath('data.auto_clock_out', false);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_bank_jam_pengambilan_and_validasi_work_across_web_and_sirom_payloads(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-26 10:00:00'));
+
+        $unitGanti = MasterUnitKerja::create([
+            'nama_unit'    => 'Farmasi',
+            'jenis_lembur' => 'ganti_jam',
+        ]);
+
+        $stafGanti = User::create([
+            'name'                    => 'Staf Farmasi',
+            'username'                => 'staf_farmasi',
+            'nik'                     => '19990002',
+            'email'                   => 'farmasi@ropanasuri.test',
+            'unit_kerja_id'           => $unitGanti->id,
+            'role'                    => 'staf',
+            'password'                => bcrypt('password123'),
+            'is_active'               => true,
+            'saldo_awal_lembur_menit' => 120,
+        ]);
+
+        $kaUnit = User::create([
+            'name'          => 'Ka Unit Farmasi',
+            'username'      => 'ka_farmasi',
+            'nik'           => '19990003',
+            'email'         => 'kafarmasi@ropanasuri.test',
+            'unit_kerja_id' => $unitGanti->id,
+            'role'          => 'kepala_unit',
+            'password'      => bcrypt('password123'),
+            'is_active'     => true,
+        ]);
+
+        // 1. Cek Bank Jam menampilkan saldo awal + teks kompatibel
+        $lemburData = $this->actingAs($stafGanti)
+            ->getJson('/app/api/lembur-data')
+            ->assertOk();
+        $this->assertEquals(120, $lemburData->json('data.bank_jam.saldo_menit_tersedia'));
+        $this->assertEquals('2 Jam', $lemburData->json('data.bank_jam.saldo_jam_teks'));
+        $this->assertEquals('2 Jam', $lemburData->json('data.bank_jam.total_lembur_disetujui_teks'));
+
+        // 2. Pengajuan Ambil Jam dengan payload gaya Web Mobile (tanggal_rencana + alasan)
+        $resAmbilWeb = $this->actingAs($stafGanti)
+            ->postJson('/app/api/lembur/ambil-jam', [
+                'tanggal_rencana' => '2026-11-27',
+                'durasi_menit'    => 60,
+                'alasan'          => 'Izin urusan keluarga',
+            ])
+            ->assertOk();
+        $this->assertTrue($resAmbilWeb->json('success'));
+        $this->assertEquals('Izin urusan keluarga', $resAmbilWeb->json('data.alasan'));
+        $ambilId = $resAmbilWeb->json('data.id');
+
+        // 3. Validasi Ambil Jam oleh Kepala Unit memakai payload Web Mobile (aksi: 'setujui')
+        $this->actingAs($kaUnit)
+            ->postJson('/app/api/validasi/ambil-jam/' . $ambilId, ['aksi' => 'setujui'])
+            ->assertOk()
+            ->assertJsonPath('success', true);
+
+        // 4. Validasi Lembur memakai payload Web Mobile (aksi: 'setujui')
+        $lemburPending = \App\Models\LogLembur::create([
+            'user_id'              => $stafGanti->id,
+            'jenis_lembur'         => 'Ekstensi Shift',
+            'waktu_mulai_lembur'   => Carbon::parse('2026-11-26 15:00:00'),
+            'waktu_selesai_lembur' => Carbon::parse('2026-11-26 16:00:00'),
+            'total_jam_lembur'     => 1.0,
+            'status_validasi'      => 'Pending',
+            'keterangan'           => 'Stok opname',
+        ]);
+
+        $this->actingAs($kaUnit)
+            ->postJson('/app/api/validasi/proses/' . $lemburPending->id, ['aksi' => 'setujui'])
+            ->assertOk()
+            ->assertJsonPath('success', true);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_roster_unit_handles_custom_shift_safely(): void
+    {
+        $kaUnit = User::create([
+            'name'          => 'Ka Unit IGD',
+            'username'      => 'ka_igd',
+            'nik'           => '19990004',
+            'email'         => 'kaigd@ropanasuri.test',
+            'unit_kerja_id' => $this->user->unit_kerja_id,
+            'role'          => 'kepala_unit',
+            'password'      => bcrypt('password123'),
+            'is_active'     => true,
+        ]);
+
+        JadwalRoster::create([
+            'user_id'           => $this->user->id,
+            'tanggal_dinas'     => '2026-11-26',
+            'sesi'              => 1,
+            'shift_id'          => null,
+            'custom_nama_shift' => 'Shift Khusus Akreditasi',
+            'custom_jam_masuk'  => '08:00:00',
+            'custom_jam_pulang' => '15:00:00',
+        ]);
+
+        $controller = new \App\Http\Controllers\Api\RosterController();
+        $req = \Illuminate\Http\Request::create('/api/roster/unit', 'GET', [
+            'bulan' => 11,
+            'tahun' => 2026,
+        ]);
+        $req->setUserResolver(fn() => $kaUnit);
+
+        $res = $controller->index($req);
+        $this->assertEquals(200, $res->getStatusCode());
+        $payload = $res->getData(true);
+        $this->assertTrue($payload['success']);
+        $this->assertEquals('Shift Khusus Akreditasi', $payload['data']['staf'][0]['jadwal'][0]['nama_shift']);
+        $this->assertEquals('2026-11-26', $payload['data']['staf'][0]['jadwal'][0]['tanggal']);
+    }
+
+    public function test_admin_laporan_and_monitoring_queries_return_expected_recaps(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-26 15:30:00'));
+
+        $unitGanti = MasterUnitKerja::create([
+            'nama_unit'    => 'Rekam Medis',
+            'jenis_lembur' => 'ganti_jam',
+        ]);
+
+        $staf = User::create([
+            'name'                    => 'Staf RM',
+            'username'                => 'staf_rm',
+            'nik'                     => '19990005',
+            'email'                   => 'rm@ropanasuri.test',
+            'unit_kerja_id'           => $unitGanti->id,
+            'role'                    => 'staf',
+            'password'                => bcrypt('password123'),
+            'is_active'               => true,
+            'saldo_awal_lembur_menit' => 90,
+        ]);
+
+        $admin = User::create([
+            'name'          => 'HRD Admin',
+            'username'      => 'hrd_admin',
+            'nik'           => '19990006',
+            'email'         => 'hrd@ropanasuri.test',
+            'unit_kerja_id' => $this->user->unit_kerja_id,
+            'role'          => 'hrd',
+            'password'      => bcrypt('password123'),
+            'is_active'     => true,
+        ]);
+
+        $shift = MasterShift::create([
+            'nama_shift'                => 'Shift Pagi',
+            'jam_masuk'                 => '07:00:00',
+            'jam_pulang'                => '14:00:00',
+            'toleransi_terlambat_menit' => 5,
+            'unit_kerja_id'             => $unitGanti->id,
+        ]);
+
+        JadwalRoster::create([
+            'user_id'       => $staf->id,
+            'tanggal_dinas' => '2026-11-26',
+            'sesi'          => 1,
+            'shift_id'      => $shift->id,
+        ]);
+
+        LogAbsensi::create([
+            'user_id'          => $staf->id,
+            'roster_id'        => null,
+            'tanggal_dinas'    => '2026-11-26',
+            'waktu_masuk'      => Carbon::parse('2026-11-26 07:02:00'),
+            'waktu_pulang'     => Carbon::parse('2026-11-26 14:05:00'),
+            'jenis_absen'      => 'dalam_radius',
+            'menit_terlambat'  => 0,
+            'status_kehadiran' => 'Tepat Waktu',
+        ]);
+
+        \App\Models\LogLembur::create([
+            'user_id'              => $staf->id,
+            'jenis_lembur'         => 'Ekstensi Shift',
+            'waktu_mulai_lembur'   => Carbon::parse('2026-11-26 14:10:00'),
+            'waktu_selesai_lembur' => Carbon::parse('2026-11-26 15:10:00'),
+            'total_jam_lembur'     => 1.0,
+            'status_validasi'      => 'Disetujui',
+            'keterangan'           => 'Input berkas',
+        ]);
+
+        \App\Models\PengambilanLembur::create([
+            'user_id'          => $staf->id,
+            'tanggal_dinas'    => '2026-11-26',
+            'tipe_pengambilan' => 'pulang_dipercepat',
+            'durasi_menit'     => 30,
+            'keterangan'       => 'Izin pulang awal',
+            'status_validasi'  => 'Disetujui',
+        ]);
+
+        // Test WebLaporanController::index (Rekap Absensi) & rekapLembur (Bank Jam teragregasi)
+        $laporanCtrl = new \App\Http\Controllers\WebLaporanController();
+        $reqLap = \Illuminate\Http\Request::create('/laporan-payroll', 'GET', [
+            'tanggal_mulai'   => '2026-11-26',
+            'tanggal_selesai' => '2026-11-26',
+            'unit'            => $unitGanti->id,
+        ]);
+        $reqLap->setUserResolver(fn() => $admin);
+        $viewLap = $laporanCtrl->index($reqLap);
+        $dataLap = $viewLap->getData();
+        $this->assertEquals(1, $dataLap['stats']['total']);
+        $this->assertEquals(1.0, $dataLap['stats']['jam_lembur']);
+
+        $reqLembur = \Illuminate\Http\Request::create('/laporan-payroll/lembur', 'GET', [
+            'bulan'   => 11,
+            'tahun'   => 2026,
+            'unit_id' => $unitGanti->id,
+            'tab'     => 'bank_jam',
+        ]);
+        $reqLembur->setUserResolver(fn() => $admin);
+        $viewLembur = $laporanCtrl->rekapLembur($reqLembur);
+        $dataLembur = $viewLembur->getData();
+        $bankRow = $dataLembur['rowsBankJam']->firstWhere('user_id', $staf->id);
+        $this->assertNotNull($bankRow);
+        // 90 (saldo awal) + 60 (1 jam lembur) = 150 diperoleh; 30 digunakan -> 120 tersedia
+        $this->assertEquals(150, $bankRow['menit_diperoleh']);
+        $this->assertEquals(30, $bankRow['menit_digunakan']);
+        $this->assertEquals(120, $bankRow['saldo_menit']);
+
+        // Test WebMonitoringController::index (pre-loaded fallback logs tanpa N+1)
+        $monCtrl = new \App\Http\Controllers\WebMonitoringController();
+        $reqMon = \Illuminate\Http\Request::create('/monitoring', 'GET', [
+            'tanggal' => '2026-11-26',
+            'unit_id' => $unitGanti->id,
+        ]);
+        $reqMon->setUserResolver(fn() => $admin);
+        $viewMon = $monCtrl->index($reqMon);
+        $dataMon = $viewMon->getData();
+        $this->assertEquals(1, $dataMon['totalJadwal']);
+        $this->assertEquals(1, $dataMon['hadirCount']);
+        $this->assertEquals(1, $dataMon['gantiJamCount']);
 
         Carbon::setTestNow();
     }

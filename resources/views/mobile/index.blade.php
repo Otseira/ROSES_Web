@@ -1099,8 +1099,16 @@
                 </div>
 
                 <div>
+                    <label class="block font-bold text-slate-700 mb-1">Jenis Pengambilan Jam</label>
+                    <select x-model="formAmbilJam.tipe_pengambilan" class="w-full p-3 rounded-2xl border border-slate-200 font-medium bg-white">
+                        <option value="pulang_dipercepat">Jam Pulang Dipercepat</option>
+                        <option value="masuk_diperlambat">Jam Masuk Diperlambat</option>
+                    </select>
+                </div>
+
+                <div>
                     <label class="block font-bold text-slate-700 mb-1">Durasi yang Diambil (Menit)</label>
-                    <input type="number" step="30" min="30" x-model="formAmbilJam.durasi_menit" placeholder="Contoh: 60, 120, 240" class="w-full p-3 rounded-2xl border border-slate-200 font-medium">
+                    <input type="number" step="15" min="15" max="480" x-model.number="formAmbilJam.durasi_menit" placeholder="Contoh: 30, 60, 120" class="w-full p-3 rounded-2xl border border-slate-200 font-medium">
                 </div>
 
                 <div>
@@ -1227,7 +1235,7 @@ function siroMobileApp() {
         submittingOnCall: false,
 
         showAmbilJamModal: false,
-        formAmbilJam: { tanggal_rencana: '', durasi_menit: 60, alasan: '' },
+        formAmbilJam: { tanggal_rencana: '', tipe_pengambilan: 'pulang_dipercepat', durasi_menit: 60, alasan: '' },
         submittingAmbilJam: false,
 
         // Validasi Atasan State
@@ -2170,7 +2178,8 @@ function siroMobileApp() {
         },
 
         openAmbilJamModal() {
-            this.formAmbilJam = { tanggal_rencana: '', durasi_menit: 60, alasan: '' };
+            const todayIso = new Date().toISOString().slice(0, 10);
+            this.formAmbilJam = { tanggal_rencana: todayIso, tipe_pengambilan: 'pulang_dipercepat', durasi_menit: 60, alasan: '' };
             this.showAmbilJamModal = true;
             if (window.lucide) setTimeout(() => lucide.createIcons(), 30);
         },
@@ -2182,16 +2191,25 @@ function siroMobileApp() {
             }
 
             this.submittingAmbilJam = true;
+            const payload = {
+                tanggal_dinas: this.formAmbilJam.tanggal_rencana,
+                tanggal_rencana: this.formAmbilJam.tanggal_rencana,
+                tipe_pengambilan: this.formAmbilJam.tipe_pengambilan || 'pulang_dipercepat',
+                durasi_menit: parseInt(this.formAmbilJam.durasi_menit, 10) || 60,
+                keterangan: this.formAmbilJam.alasan,
+                alasan: this.formAmbilJam.alasan
+            };
             const json = await this.safeFetch('{{ route('app.api.lembur.ambil-jam', [], false) }}', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(this.formAmbilJam)
+                body: JSON.stringify(payload)
             });
             this.submittingAmbilJam = false;
 
             if (json && json.success) {
                 this.showToast('Permohonan ambil saldo jam berhasil dikirim!');
                 this.showAmbilJamModal = false;
+                this.fetchTodayStatus();
                 this.fetchLemburData();
             } else {
                 this.showToast((json && json.message) || 'Gagal mengajukan ambil jam.', 'error');

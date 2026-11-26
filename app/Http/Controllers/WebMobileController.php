@@ -247,7 +247,7 @@ class WebMobileController extends Controller
                     'id'           => $onCallAktif->id,
                     'waktu_mulai'  => Carbon::parse($onCallAktif->waktu_mulai_lembur)->format('H:i'),
                     'tanggal_mulai'=> Carbon::parse($onCallAktif->waktu_mulai_lembur)->translatedFormat('d M Y'),
-                    'keterangan'   => $onCallAktif->alasan_lembur,
+                    'keterangan'   => $onCallAktif->keterangan ?? '-',
                 ] : null,
                 'bank_jam'               => $bankJam,
                 'can_validasi'           => $user->canValidasi(),

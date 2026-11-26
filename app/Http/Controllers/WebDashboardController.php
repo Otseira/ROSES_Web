@@ -47,6 +47,10 @@ class WebDashboardController extends Controller
         $recentAbsensi = collect();
 
         if ($canSeeManagement) {
+            $managedUserIds = $isGlobal
+                ? null
+                : (empty($managedUnits) ? [] : \App\Models\User::whereIn('unit_kerja_id', $managedUnits)->pluck('id')->all());
+
             $h = $this->kkHitung($userLogin);
             $persenHadir = $h['dinas'] > 0 ? round(($h['hadir'] / $h['dinas']) * 100, 1) : 0;
             $summary = [
@@ -61,18 +65,19 @@ class WebDashboardController extends Controller
 
             // 1. Notifikasi lembur yang menunggu validasi
             $pendingQuery = \App\Models\LogLembur::where('status_validasi', 'Pending');
-            if (!$isGlobal) {
-                if (empty($managedUnits)) {
-                    $pendingQuery->whereRaw('1 = 0');
-                } else {
-                    $pendingQuery->whereHas('user', function ($q) use ($managedUnits) {
-                        $q->whereIn('unit_kerja_id', $managedUnits);
-                    });
-                }
+            if ($managedUserIds !== null) {
+                $pendingQuery->when(
+                    empty($managedUserIds),
+                    fn($q) => $q->whereRaw('1 = 0'),
+                    fn($q) => $q->whereIn('user_id', $managedUserIds)
+                );
             }
             $pendingLemburCount = $pendingQuery->count();
 
             // 2. Feed log absensi terkini hari ini (6 aktivitas terbaru)
+            $hariIniStart = Carbon::today()->startOfDay()->toDateTimeString();
+            $hariIniEnd   = Carbon::today()->endOfDay()->toDateTimeString();
+
             $recentQuery = LogAbsensi::select([
                     'id', 'user_id', 'roster_id', 'tanggal_dinas', 'waktu_masuk', 'waktu_pulang',
                     'menit_terlambat', 'status_kehadiran'
@@ -80,23 +85,22 @@ class WebDashboardController extends Controller
                 ->with([
                     'user:id,name,nik,unit_kerja_id',
                     'user.unitKerja:id,nama_unit',
+                    'roster:id,shift_id',
                     'roster.shift:id,nama_shift'
                 ])
-                ->where(function ($q) use ($hariIni) {
-                    $q->whereDate('waktu_masuk', $hariIni)
+                ->where(function ($q) use ($hariIni, $hariIniStart, $hariIniEnd) {
+                    $q->whereBetween('waktu_masuk', [$hariIniStart, $hariIniEnd])
                       ->orWhere('tanggal_dinas', $hariIni);
                 })
                 ->whereNotNull('waktu_masuk')
                 ->latest('waktu_masuk');
 
-            if (!$isGlobal) {
-                if (empty($managedUnits)) {
-                    $recentQuery->whereRaw('1 = 0');
-                } else {
-                    $recentQuery->whereHas('user', function ($q) use ($managedUnits) {
-                        $q->whereIn('unit_kerja_id', $managedUnits);
-                    });
-                }
+            if ($managedUserIds !== null) {
+                $recentQuery->when(
+                    empty($managedUserIds),
+                    fn($q) => $q->whereRaw('1 = 0'),
+                    fn($q) => $q->whereIn('user_id', $managedUserIds)
+                );
             }
             $recentAbsensi = $recentQuery->take(6)->get();
         }
@@ -115,16 +119,16 @@ class WebDashboardController extends Controller
         $startBulan = Carbon::today()->startOfMonth()->toDateString();
         $endBulan   = Carbon::today()->endOfMonth()->toDateString();
 
+        $rekapAgg = LogAbsensi::where('user_id', $userLogin->id)
+            ->whereBetween('tanggal_dinas', [$startBulan, $endBulan])
+            ->selectRaw('SUM(CASE WHEN waktu_masuk IS NOT NULL THEN 1 ELSE 0 END) as hadir, COALESCE(SUM(menit_terlambat), 0) as telat')
+            ->first();
+
         $myRekap = [
-            'hadir'  => LogAbsensi::where('user_id', $userLogin->id)
-                ->whereBetween('tanggal_dinas', [$startBulan, $endBulan])
-                ->whereNotNull('waktu_masuk')
-                ->count(),
-            'telat'  => (int) LogAbsensi::where('user_id', $userLogin->id)
-                ->whereBetween('tanggal_dinas', [$startBulan, $endBulan])
-                ->sum('menit_terlambat'),
+            'hadir'  => (int) ($rekapAgg->hadir ?? 0),
+            'telat'  => (int) ($rekapAgg->telat ?? 0),
             'lembur' => (float) \App\Models\LogLembur::where('user_id', $userLogin->id)
-                ->whereBetween('waktu_mulai_lembur', [$startBulan, $endBulan])
+                ->whereBetween('waktu_mulai_lembur', [$startBulan . ' 00:00:00', $endBulan . ' 23:59:59'])
                 ->where('status_validasi', 'Disetujui')
                 ->sum('total_jam_lembur'),
         ];
@@ -175,20 +179,27 @@ class WebDashboardController extends Controller
 
     private function kkRostersHariIni($user)
     {
+        $managedUserIds = null;
+        if (!$this->kkIsGlobal($user)) {
+            $managed = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
+            if ($user->unit_kerja_id && !in_array($user->unit_kerja_id, $managed)) {
+                $managed[] = $user->unit_kerja_id;
+            }
+            $managedUserIds = empty($managed) ? [] : \App\Models\User::whereIn('unit_kerja_id', $managed)->pluck('id')->all();
+        }
+
         return \App\Models\JadwalRoster::select(['id', 'user_id', 'shift_id', 'tanggal_dinas'])
             ->with([
                 'shift:id,nama_shift',
                 'logAbsensi:id,roster_id,waktu_masuk,menit_terlambat',
             ])
             ->where('tanggal_dinas', now()->toDateString())
-            ->when(!$this->kkIsGlobal($user), function ($q) use ($user) {
-                $managed = $user->managesUnits()->pluck('master_unit_kerja_id')->toArray();
-                if ($user->unit_kerja_id && !in_array($user->unit_kerja_id, $managed)) {
-                    $managed[] = $user->unit_kerja_id;
+            ->when($managedUserIds !== null, function ($q) use ($managedUserIds) {
+                if (empty($managedUserIds)) {
+                    $q->whereRaw('1 = 0');
+                } else {
+                    $q->whereIn('user_id', $managedUserIds);
                 }
-                $q->whereHas('user', function ($u) use ($managed) {
-                    $u->whereIn('unit_kerja_id', $managed);
-                });
             })
             ->get();
     }
@@ -199,9 +210,9 @@ class WebDashboardController extends Controller
         return $nama === '' || $nama === 'off' || str_contains($nama, 'libur');
     }
 
-    private function kkHitung($user)
+    private function kkHitung($user, $rosters = null)
     {
-        $rosters      = $this->kkRostersHariIni($user);
+        $rosters      = $rosters ?? $this->kkRostersHariIni($user);
         $dinasR       = $rosters->reject(fn($r) => $this->kkIsLibur($r));
         $hadirR       = $dinasR->filter(fn($r) => !empty($r->logAbsensi?->waktu_masuk));
         $terlambatR   = $hadirR->filter(fn($r) => ($r->logAbsensi?->menit_terlambat ?? 0) > 0);
@@ -260,8 +271,9 @@ class WebDashboardController extends Controller
             return response()->json(['message' => 'Dilarang.'], 403);
         }
 
-        $filter = $request->query('filter', 'total');
-        $h      = $this->kkHitung($user);
+        $filter       = $request->query('filter', 'total');
+        $rostersList  = $this->kkRostersHariIni($user);
+        $h            = $this->kkHitung($user, $rostersList);
 
         switch ($filter) {
             case 'hadir':
@@ -281,7 +293,7 @@ class WebDashboardController extends Controller
                 break; // total
         }
 
-        $todayRosters = $this->kkRostersHariIni($user)->keyBy('user_id');
+        $todayRosters = $rostersList->keyBy('user_id');
 
         $rows = $q->select(['id', 'name', 'nik', 'unit_kerja_id'])
             ->with('unitKerja:id,nama_unit')

@@ -52,6 +52,9 @@ class WebMonitoringController extends Controller
         $lngRS = $pengaturan ? (float) $pengaturan->longitude : 0;
         $namaInstansi = $pengaturan->nama_instansi ?? 'Rumah Sakit';
 
+        $tglStart = Carbon::parse($tanggalPilihan)->startOfDay()->toDateTimeString();
+        $tglEnd   = Carbon::parse($tanggalPilihan)->endOfDay()->toDateTimeString();
+
         // 6. Tarik Data Roster Jadwal Dinas pada Tanggal Tersebut
         $rosterQuery = JadwalRoster::query()
             ->with([
@@ -68,13 +71,16 @@ class WebMonitoringController extends Controller
                     ]);
                 }
             ])
-            ->whereDate('tanggal_dinas', $tanggalPilihan);
+            ->whereBetween('tanggal_dinas', [$tanggalPilihan, $tanggalPilihan . ' 23:59:59']);
 
+        $scopedUserIds = null;
         if (!$isGlobal) {
             if (empty($managedUnits)) {
                 $rosterQuery->whereRaw('1 = 0');
+                $scopedUserIds = [];
             } else {
-                $rosterQuery->whereHas('user', fn($q) => $q->whereIn('unit_kerja_id', $managedUnits));
+                $scopedUserIds = \App\Models\User::whereIn('unit_kerja_id', $managedUnits)->pluck('id')->all();
+                $rosterQuery->whereIn('user_id', $scopedUserIds);
             }
         }
 
@@ -95,8 +101,26 @@ class WebMonitoringController extends Controller
 
         $allRosters = $rosterQuery->get();
 
+        // Pre-load LogAbsensi tanggal pilihan dalam 1 query agar tidak N+1 di loop foreach
+        $fallbackLogsByUser = collect();
+        $rosterUserIds = $allRosters->pluck('user_id')->unique()->filter()->values()->all();
+        if (!empty($rosterUserIds)) {
+            $fallbackLogsByUser = LogAbsensi::select([
+                    'id', 'user_id', 'roster_id', 'tanggal_dinas',
+                    'waktu_masuk', 'waktu_pulang', 'menit_terlambat',
+                    'status_kehadiran', 'foto_masuk', 'foto_pulang',
+                    'latitude_masuk', 'longitude_masuk', 'latitude_pulang', 'longitude_pulang',
+                    'durasi_kerja', 'jenis_absen'
+                ])
+                ->whereIn('user_id', $rosterUserIds)
+                ->whereBetween('waktu_masuk', [$tglStart, $tglEnd])
+                ->latest('waktu_masuk')
+                ->get()
+                ->keyBy('user_id');
+        }
+
         // 7. Tarik Data Dispensasi Pengambilan Jam (Kompensasi) Hari Ini
-        $pengambilanHariIni = PengambilanLembur::whereDate('tanggal_dinas', $tanggalPilihan)
+        $pengambilanHariIni = PengambilanLembur::whereBetween('tanggal_dinas', [$tanggalPilihan, $tanggalPilihan . ' 23:59:59'])
             ->where('status_validasi', 'Disetujui')
             ->get()
             ->keyBy('user_id');
@@ -104,10 +128,14 @@ class WebMonitoringController extends Controller
         // 8. Tarik Data Sesi On-Call Aktif Hari Ini
         $onCallQuery = LogLembur::with(['user.unitKerja'])
             ->where('jenis_lembur', 'On-Call')
-            ->whereDate('waktu_mulai_lembur', $tanggalPilihan);
+            ->whereBetween('waktu_mulai_lembur', [$tglStart, $tglEnd]);
 
-        if (!$isGlobal) {
-            $onCallQuery->whereHas('user', fn($q) => $q->whereIn('unit_kerja_id', $managedUnits));
+        if ($scopedUserIds !== null) {
+            $onCallQuery->when(
+                empty($scopedUserIds),
+                fn($q) => $q->whereRaw('1 = 0'),
+                fn($q) => $q->whereIn('user_id', $scopedUserIds)
+            );
         }
         $onCallHariIni = $onCallQuery->get();
         $onCallAktifList = $onCallHariIni->whereNull('waktu_selesai_lembur');
@@ -128,11 +156,9 @@ class WebMonitoringController extends Controller
             $shift = $r->shift;
             $log   = $r->logAbsensi;
 
-            // Jika logAbsensi belum terkait via roster_id, coba cek via user_id & tanggal
+            // Jika logAbsensi belum terkait via roster_id, ambil dari peta pre-loaded (O(1))
             if (!$log && $user) {
-                $log = LogAbsensi::where('user_id', $user->id)
-                    ->whereDate('waktu_masuk', $tanggalPilihan)
-                    ->first();
+                $log = $fallbackLogsByUser->get($user->id);
             }
 
             $waktuMasuk  = $log?->waktu_masuk ? Carbon::parse($log->waktu_masuk) : null;
